@@ -280,6 +280,7 @@
   <div class="tab" onclick="switchTab('leave')">📝 有給</div>
   <div class="tab" onclick="switchTab('balance')">📅 残日数</div>
   <div class="tab" onclick="switchTab('payroll')">💴 給与</div>
+  <div class="tab" onclick="switchTab('attedit')">✏修正</div>
   <div class="tab" onclick="switchTab('empset')">⚙社員</div>
 </div>
 
@@ -386,6 +387,41 @@
       <div style="font-size:11px;color:#999;margin-top:10px;line-height:1.6;">
         ・区分別（平日／土曜／日祝）の勤務時間と合計を表示します<br>
         ・実際の給与計算は会計ソフトで行ってください
+      </div>
+    </div>
+  </div>
+
+  <!-- 勤怠修正タブ（管理者の代理打刻・修正） -->
+  <div class="tab-panel" id="tab-attedit">
+    <div class="card">
+      <div class="card-title">✏ 勤怠の代理打刻・修正</div>
+      <label style="font-size:13px;color:#555;">社員を選択</label>
+      <select id="aeEmployee" class="k-select" onchange="aeLoadMonth()"></select>
+
+      <label style="font-size:13px;color:#555;">日付</label>
+      <input type="date" id="aeDate" class="k-select" onchange="aeFillFromRecord()">
+
+      <div style="display:flex;gap:10px;margin-top:4px;">
+        <div style="flex:1;">
+          <label style="font-size:13px;color:#555;">出勤時刻</label>
+          <input type="time" id="aeIn" class="k-select">
+        </div>
+        <div style="flex:1;">
+          <label style="font-size:13px;color:#555;">退勤時刻</label>
+          <input type="time" id="aeOut" class="k-select">
+        </div>
+      </div>
+
+      <div id="aeExisting" style="font-size:12px;color:#777;margin:8px 0;min-height:18px;"></div>
+
+      <button class="btn-login" style="background:#2E7D32;margin-top:6px;" onclick="aeSave()">💾 この日の勤怠を保存</button>
+      <div class="msg" id="aeMsg" style="display:none;margin-top:10px;"></div>
+
+      <div style="font-size:11px;color:#999;margin-top:12px;line-height:1.7;">
+        ・スマホ故障・打刻忘れ・時刻ミスの救済用。社員を選び日付を選ぶと既存の打刻が入ります<br>
+        ・出勤だけ／出勤＋退勤の保存OK。勤務時間は自動計算<br>
+        ・<strong>出勤・退勤を両方空にして保存すると、その日の記録を削除</strong>（誤登録の取消）<br>
+        ・保存した記録には「管理者修正」の印と修正者・日時が残ります
       </div>
     </div>
   </div>
@@ -869,6 +905,93 @@ function showKMsg(type, text) {
   el.style.display = 'block';
 }
 
+// ============================================================
+// 勤怠修正（管理者の代理打刻・修正）
+// ============================================================
+let aeData = null;        // { employees:[...] } 社員リスト（役員除く）
+let aeRecords = {};       // 'yyyy/MM/dd' -> {clockIn, clockOut, hours, note}
+let aeLoadedKey = '';     // 直近で読み込んだ「社員_年月」キー（重複読込防止）
+
+async function loadAttEdit() {
+  // 打刻対象の社員（役員除く）を選択肢に
+  const d = await api({ type: 'get_employees_admin' });
+  if (!d.success) { aeShowMsg('error', d.message); return; }
+  aeData = d.employees.filter(e => !e.isAdmin);
+  const sel = document.getElementById('aeEmployee');
+  sel.innerHTML = aeData.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
+  // 日付の初期値＝今日
+  const n = new Date();
+  document.getElementById('aeDate').value =
+    n.getFullYear() + '-' + String(n.getMonth() + 1).padStart(2, '0') + '-' + String(n.getDate()).padStart(2, '0');
+  await aeLoadMonth();
+}
+
+// 選択中の社員・選択中の月の打刻記録を取得してキャッシュ
+async function aeLoadMonth() {
+  const empId = document.getElementById('aeEmployee').value;
+  const dv = document.getElementById('aeDate').value; // yyyy-MM-dd
+  if (!empId || !dv) return;
+  const [y, m] = dv.split('-').map(Number);
+  const key = empId + '_' + y + '_' + m;
+  aeLoadedKey = key;
+  const d = await api({ type: 'get_attendance_admin', employeeId: empId, year: y, month: m });
+  if (!d.success) { aeShowMsg('error', d.message); return; }
+  if (aeLoadedKey !== key) return; // 読込中に切替わったら破棄
+  aeRecords = d.records || {};
+  aeFillFromRecord();
+}
+
+// 選択中の日付の既存記録をフォームに反映
+function aeFillFromRecord() {
+  const dv = document.getElementById('aeDate').value; // yyyy-MM-dd
+  if (!dv) return;
+  // キャッシュは社員・月単位。月をまたいだら読み直し
+  const empId = document.getElementById('aeEmployee').value;
+  const [y, m] = dv.split('-').map(Number);
+  if (aeLoadedKey !== empId + '_' + y + '_' + m) { aeLoadMonth(); return; }
+
+  const ds = dv.replace(/-/g, '/'); // yyyy/MM/dd
+  const rec = aeRecords[ds];
+  document.getElementById('aeIn').value  = rec ? (rec.clockIn  || '') : '';
+  document.getElementById('aeOut').value = rec ? (rec.clockOut || '') : '';
+  const ex = document.getElementById('aeExisting');
+  if (rec) {
+    ex.innerHTML = '既存記録：出勤 ' + (rec.clockIn || '—') + ' / 退勤 ' + (rec.clockOut || '—') +
+      (rec.hours !== '' ? ' / ' + rec.hours + 'h' : '') +
+      (rec.note ? '<br><span style="color:#999;">備考：' + rec.note + '</span>' : '');
+  } else {
+    ex.textContent = 'この日の記録はまだありません（新規登録になります）';
+  }
+}
+
+async function aeSave() {
+  const empId = document.getElementById('aeEmployee').value;
+  const dv    = document.getElementById('aeDate').value;
+  if (!empId || !dv) { aeShowMsg('error', '社員と日付を選んでください'); return; }
+  const clockIn  = document.getElementById('aeIn').value;
+  const clockOut = document.getElementById('aeOut').value;
+  const name = (aeData.find(e => e.id === empId) || {}).name || '';
+
+  if (!clockIn && !clockOut) {
+    if (!confirm(name + ' さんの ' + dv + ' の勤怠記録を削除します。よろしいですか？')) return;
+  }
+  aeShowMsg('info', '保存中...');
+  const d = await api({ type: 'save_attendance_admin', employeeId: empId, date: dv, clockIn, clockOut });
+  if (!d.success) { aeShowMsg('error', d.message); return; }
+  if (d.deleted)      aeShowMsg('success', '✅ ' + d.name + ' ' + d.date + ' の記録を削除しました');
+  else                aeShowMsg('success', '✅ ' + d.name + ' ' + d.date + ' を保存しました（出勤 ' + (d.clockIn || '—') + ' / 退勤 ' + (d.clockOut || '—') + (d.hours !== '' ? ' / ' + d.hours + 'h' : '') + '）');
+  // キャッシュを更新して再表示
+  await aeLoadMonth();
+}
+
+function aeShowMsg(type, text) {
+  const el = document.getElementById('aeMsg');
+  el.className = 'msg ' + type;
+  el.style.color = type === 'error' ? '#c00' : type === 'success' ? '#2E7D32' : '#555';
+  el.textContent = text;
+  el.style.display = 'block';
+}
+
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
@@ -879,6 +1002,7 @@ function switchTab(name) {
     if (!payYear) { payMonthInit(); document.getElementById('payMonthLabel').textContent = payYear + '年 ' + payMonth2 + '月'; }
   }
   if (name === 'empset' && !empSetData) loadEmpSettings();
+  if (name === 'attedit' && !aeData) loadAttEdit();
 }
 
 // LIFF初期化 → 本人のUserID取得 → ダッシュボード読み込み（管理者判定はサーバー側）
