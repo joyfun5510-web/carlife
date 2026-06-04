@@ -82,6 +82,7 @@
   .dot-absent         { background: #EF5350; }
   .dot-holiday        { background: #E0E0E0; }
   .dot-koukyuu        { background: #B0BEC5; }
+  .dot-leave          { background: #26A69A; }
 
   /* カレンダー */
   .calendar-wrap { padding: 12px; }
@@ -147,6 +148,7 @@
   .day-cell.status-absent         { background: #FFEBEE; }
   .day-cell.status-holiday        { background: #FAFAFA; }
   .day-cell.status-koukyuu        { background: #ECEFF1; }
+  .day-cell.status-leave          { background: #E0F2F1; }
   .day-cell.status-koukyuu_request { background: #EDE7F6; border: 1px dashed #9575CD; }
 
   .day-time {
@@ -245,6 +247,7 @@
   .chip-absent         { background: #FFEBEE; color: #B71C1C; }
   .chip-holiday        { background: #f5f5f5; color: #888; }
   .chip-koukyuu        { background: #ECEFF1; color: #546E7A; }
+  .chip-leave          { background: #E0F2F1; color: #00695C; }
   .chip-koukyuu-request{ background: #EDE7F6; color: #6A1B9A; }
 
   .btn-change {
@@ -430,6 +433,7 @@
   <div class="legend-item"><div class="dot dot-change-pending"></div>変更申請中</div>
   <div class="legend-item"><div class="dot dot-change-approved"></div>変更承認済</div>
   <div class="legend-item"><div class="dot dot-koukyuu"></div>公休</div>
+  <div class="legend-item"><div class="dot dot-leave"></div>有給</div>
   <div class="legend-item"><div class="dot dot-absent"></div>欠勤</div>
 </div>
 
@@ -548,6 +552,7 @@ const STATUS_LABEL = {
   holiday:            '休日',
   koukyuu:            '公休',
   koukyuu_request:    '休み希望中',
+  leave:              '有給休暇',
 };
 
 function renderCalendar(data) {
