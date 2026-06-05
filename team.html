@@ -121,8 +121,13 @@ function openDay(dn) {
   const off  = day.off.length ? day.off.map(n=> onLeave.indexOf(n)>=0
       ? `<span class="chip leave">${n}（有給）</span>`
       : `<span class="chip off">${n}</span>`).join('') : '<span style="color:#aaa;font-size:13px;">なし</span>';
+  const halfLeave = day.halfLeave || [];
+  const halfHtml = halfLeave.length
+    ? `<div class="grp-title">🕐 半休（${halfLeave.length}人）</div><div class="chips">${halfLeave.map(n=>`<span class="chip leave">${n}</span>`).join('')}</div>`
+    : '';
   document.getElementById('sheetBody').innerHTML =
     `<div class="grp-title">🟢 出勤予定（${day.working.length}人）</div><div class="chips">${work}</div>` +
+    halfHtml +
     `<div class="grp-title">⚪ 休み（${day.off.length}人）</div><div class="chips">${off}</div>`;
   document.getElementById('overlay').classList.add('show');
   document.getElementById('sheet').classList.add('show');

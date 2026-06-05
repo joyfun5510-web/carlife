@@ -149,6 +149,7 @@
   .day-cell.status-holiday        { background: #FAFAFA; }
   .day-cell.status-koukyuu        { background: #ECEFF1; }
   .day-cell.status-leave          { background: #E0F2F1; }
+  .day-cell.status-leave_half     { background: #F1F8F7; border: 1px dashed #4DB6AC; }
   .day-cell.status-koukyuu_request { background: #EDE7F6; border: 1px dashed #9575CD; }
 
   .day-time {
@@ -248,6 +249,7 @@
   .chip-holiday        { background: #f5f5f5; color: #888; }
   .chip-koukyuu        { background: #ECEFF1; color: #546E7A; }
   .chip-leave          { background: #E0F2F1; color: #00695C; }
+  .chip-leave-half     { background: #F1F8F7; color: #00796B; }
   .chip-koukyuu-request{ background: #EDE7F6; color: #6A1B9A; }
 
   .btn-change {
@@ -553,6 +555,7 @@ const STATUS_LABEL = {
   koukyuu:            '公休',
   koukyuu_request:    '休み希望中',
   leave:              '有給休暇',
+  leave_half:         '有給(半休)',
 };
 
 function renderCalendar(data) {
@@ -643,6 +646,10 @@ function openDayDetail(day) {
   const chipCls = 'chip-' + d.status.replace('_', '-');
 
   let html = `<span class="status-chip ${chipCls}">${statusLabel}</span>`;
+  // 半休（午前/午後）の補足。打刻があってもバッジで表示
+  if (d.leave === '午前' || d.leave === '午後') {
+    html += `<span class="status-chip chip-leave" style="margin-left:6px;">${d.leave}半休（${d.leave==='午前'?'10:00-14:00':'14:00-18:00'}）</span>`;
+  }
 
   // シフト情報
   if (d.shift) {

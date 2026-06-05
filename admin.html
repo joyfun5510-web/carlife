@@ -545,11 +545,14 @@ function renderLeave(pending) {
     container.innerHTML = '<div class="empty">申請中の有給はありません</div>';
     return;
   }
-  container.innerHTML = pending.map(app => `
+  container.innerHTML = pending.map(app => {
+    const half = app.halfType === '午前' ? '（午前半休 10-14時）' : app.halfType === '午後' ? '（午後半休 14-18時）' : '';
+    const period = half ? (fmtDate(app.startDate) + ' ' + half) : (fmtDate(app.startDate) + ' 〜 ' + fmtDate(app.endDate));
+    return `
     <div class="leave-card" id="leave-${app.id}">
       <div class="leave-name">${app.name}</div>
       <div class="leave-info">
-        📅 ${app.startDate} 〜 ${app.endDate}（${app.days}日間）<br>
+        📅 ${period}（${app.days}日）<br>
         📝 ${app.reason || '理由なし'}<br>
         🕐 申請：${app.appliedAt}
       </div>
@@ -557,8 +560,19 @@ function renderLeave(pending) {
         <button class="btn-approve" onclick="approveLeave('${app.id}', this)">✅ 承認</button>
         <button class="btn-reject"  onclick="rejectLeave('${app.id}', this)">❌ 否認</button>
       </div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
+}
+
+// 日付表示を yyyy/MM/dd に整える（ISO文字列でも日付でも対応・JST基準）
+function fmtDate(v) {
+  if (!v) return '';
+  const s = String(v);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s.replace(/-/g, '/');
+  const d = new Date(s);
+  if (isNaN(d)) return s;
+  const j = new Date(d.getTime() + 9 * 3600000); // JST
+  return j.getUTCFullYear() + '/' + String(j.getUTCMonth() + 1).padStart(2, '0') + '/' + String(j.getUTCDate()).padStart(2, '0');
 }
 
 function renderBalance(balance) {

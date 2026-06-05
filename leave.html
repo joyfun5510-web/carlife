@@ -57,7 +57,7 @@
     margin-bottom: 6px;
     margin-top: 14px;
   }
-  input, textarea {
+  input, select, textarea {
     width: 100%;
     padding: 12px;
     border: 1.5px solid #ddd;
@@ -65,8 +65,9 @@
     font-size: 15px;
     font-family: inherit;
     transition: border-color 0.2s;
+    background: #fff;
   }
-  input:focus, textarea:focus {
+  input:focus, select:focus, textarea:focus {
     outline: none;
     border-color: #2196F3;
   }
@@ -178,10 +179,18 @@
   <!-- 申請フォーム -->
   <div class="card section-hidden" id="formSection">
     <h2>申請内容</h2>
-    <label>開始日</label>
+    <label>種別</label>
+    <select id="halfType" onchange="onHalfChange()">
+      <option value="全休">全休（1日）</option>
+      <option value="午前">午前半休（10:00〜14:00／0.5日）</option>
+      <option value="午後">午後半休（14:00〜18:00／0.5日）</option>
+    </select>
+    <label id="startLabel">開始日</label>
     <input type="date" id="startDate" onchange="calcDays()">
-    <label>終了日</label>
-    <input type="date" id="endDate" onchange="calcDays()">
+    <div id="endWrap">
+      <label>終了日</label>
+      <input type="date" id="endDate" onchange="calcDays()">
+    </div>
     <div class="days-preview section-hidden" id="daysPreview"></div>
     <label>理由（任意）</label>
     <textarea id="reason" placeholder="例：私用のため"></textarea>
@@ -235,23 +244,39 @@ async function loadBalance() {
   }
 }
 
+function isHalf() {
+  const v = document.getElementById('halfType').value;
+  return v === '午前' || v === '午後';
+}
+
+// 種別変更：半休なら終了日を隠して単日に
+function onHalfChange() {
+  const half = isHalf();
+  document.getElementById('endWrap').style.display = half ? 'none' : 'block';
+  document.getElementById('startLabel').textContent = half ? '日付' : '開始日';
+  if (half) document.getElementById('endDate').value = document.getElementById('startDate').value;
+  calcDays();
+}
+
 function calcDays() {
   const s = document.getElementById('startDate').value;
-  const e = document.getElementById('endDate').value;
+  const half = isHalf();
+  const e = half ? s : document.getElementById('endDate').value;
   if (!s || !e) return;
 
   const start = new Date(s);
   const end   = new Date(e);
-  if (end < start) {
+  if (!half && end < start) {
     showMsg('formMsg', 'error', '終了日は開始日以降を選択してください');
     document.getElementById('btnSubmit').disabled = true;
     document.getElementById('daysPreview').classList.add('section-hidden');
     return;
   }
 
-  const days    = Math.round((end - start) / 86400000) + 1;
+  const days    = half ? 0.5 : (Math.round((end - start) / 86400000) + 1);
   const preview = document.getElementById('daysPreview');
-  preview.textContent = days + '日間（残日数：' + remainingDays + '日）';
+  const halfLabel = half ? '（' + document.getElementById('halfType').value + '半休）' : '間';
+  preview.textContent = days + '日' + halfLabel + '（残日数：' + remainingDays + '日）';
   preview.classList.remove('section-hidden');
 
   const msg = document.getElementById('formMsg');
@@ -266,12 +291,14 @@ function calcDays() {
 }
 
 async function submitForm() {
+  const halfType  = document.getElementById('halfType').value;
+  const half      = isHalf();
   const startDate = document.getElementById('startDate').value;
-  const endDate   = document.getElementById('endDate').value;
+  const endDate   = half ? startDate : document.getElementById('endDate').value;
   const reason    = document.getElementById('reason').value.trim();
 
-  if (!startDate || !endDate) {
-    showMsg('formMsg', 'error', '開始日と終了日を入力してください');
+  if (!startDate || (!half && !endDate)) {
+    showMsg('formMsg', 'error', half ? '日付を入力してください' : '開始日と終了日を入力してください');
     return;
   }
 
@@ -282,7 +309,7 @@ async function submitForm() {
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body:    JSON.stringify({
         type: 'submit_leave',
-        data: { userId, startDate, endDate, reason }
+        data: { userId, startDate, endDate, reason, halfType }
       })
     });
     const data = await res.json();
