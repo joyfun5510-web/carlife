@@ -22,8 +22,12 @@
   .dow.sun { color: #E53935; } .dow.sat { color: #1E88E5; }
   .cell { aspect-ratio: 1/1; display: flex; align-items: center; justify-content: center; border-radius: 8px;
           font-size: 15px; border: 1.5px solid #e0e0e0; background: #fff; color: #333; cursor: pointer; user-select: none; }
+  .cell { position: relative; flex-direction: column; }
   .cell.req { background: #EDE7F6; color: #6A1B9A; border-color: #B39DDB; font-weight: bold; }
+  .cell.req.half { background: #F3E5F5; border-style: dashed; }
+  .hb { font-size: 9px; line-height: 1; margin-top: 1px; padding: 1px 3px; border-radius: 4px; background: #6A1B9A; color: #fff; font-weight: bold; }
   .cell.fixed { background: #ECEFF1; color: #90A4AE; border-color: #cfd8dc; cursor: not-allowed; }
+  .cell.fixed .hb { background: #90A4AE; }
   .cell.past { background: #fafafa; color: #ccc; border-color: #eee; cursor: not-allowed; }
   .cell.blank { background: transparent; border: none; cursor: default; }
   .cell.sun { color: #E53935; } .cell.sat { color: #1E88E5; }
@@ -56,13 +60,15 @@
       <div class="count" id="count"></div>
       <div class="grid" id="grid"></div>
       <div class="legend">
-        <span><span class="legdot" style="background:#EDE7F6;border:1px solid #B39DDB;"></span>希望</span>
-        <span><span class="legdot" style="background:#ECEFF1;"></span>確定済（変更不可）</span>
+        <span><span class="legdot" style="background:#EDE7F6;border:1px solid #B39DDB;"></span>希望(全休)</span>
+        <span><span class="legdot" style="background:#F3E5F5;border:1px dashed #B39DDB;"></span>半休</span>
+        <span><span class="legdot" style="background:#ECEFF1;"></span>確定済</span>
       </div>
       <button class="btn" id="submitBtn" onclick="submit()">この内容で休み希望を送信</button>
       <div class="msg" id="msg"></div>
       <div style="font-size:11px;color:#999;margin-top:10px;line-height:1.6;">
-        ・休みたい日をタップで選んで送信してください（当月・翌月どちらもOK。›で翌月へ）。<br>
+        ・休みたい日をタップで選びます。タップするたびに <b>全休 → 午前半休(前) → 午後半休(後) → 解除</b> と切り替わります。<br>
+        ・半休は0.5日として数えます（例：全休4日＋半休4回＝6日分）。<br>
         ・過去の日と確定済みの日は選べません。<br>
         ・送信後、管理者が確認して確定します。確定で公休になります。
       </div>
@@ -74,8 +80,10 @@
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbxNeh517FPMHlPy8b6w3kDVU9ygesSH0fDZqE_z-YpLU1g-ymra8nVa0Lr8i_NM2y-XLw/exec';
 const LIFF_ID = '2010271028-O7CB5K21';
 const DOW = ['日','月','火','水','木','金','土'];
-let userId = null, year, month, data = null, sel = new Set();
+let userId = null, year, month, data = null, sel = new Map(); // ds -> '全休'|'午前'|'午後'
 let MIN_Y, MIN_M; // 当月（これより前の月には戻れない）
+const HW = h => (h === '午前' || h === '午後') ? 0.5 : 1; // 消費日数
+const HLABEL = { '午前':'前', '午後':'後' };
 
 async function api(p) {
   const res = await fetch(GAS_URL, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify(Object.assign({userId}, p)) });
@@ -86,7 +94,7 @@ async function load() {
   const d = await api({ type:'get_my_kibou', year, month });
   if (!d.success) { showMsg('error', d.message); return; }
   data = d;
-  sel = new Set(d.kibou);
+  sel = new Map((d.kibou || []).map(x => [x.d, x.h || '全休']));
   document.getElementById('empName').textContent = d.name + ' さん';
   document.getElementById('empSub').textContent = d.empType + '（休み希望は最大' + d.limit + '日/月）';
   document.getElementById('monthLabel').textContent = year + '年 ' + month + '月';
@@ -109,8 +117,9 @@ function changeMonth(delta) {
 function render() {
   const dim = data.daysInMonth;
   const first = new Date(year, month-1, 1).getDay();
-  const confirmed = new Set(data.confirmed);
-  const confCount = data.confirmed.length;
+  const confMap = new Map((data.confirmed || []).map(x => [x.d, x.h || '全休']));
+  const confDays = (typeof data.confirmedDays === 'number') ? data.confirmedDays
+                 : (data.confirmed || []).reduce((s,x) => s + HW(x.h), 0);
   const n = new Date();
   const todayStr = n.getFullYear()+'/'+String(n.getMonth()+1).padStart(2,'0')+'/'+String(n.getDate()).padStart(2,'0');
   let html = DOW.map((d,i)=>`<div class="dow ${i===0?'sun':i===6?'sat':''}">${d}</div>`).join('');
@@ -119,30 +128,43 @@ function render() {
     const ds = year+'/'+String(month).padStart(2,'0')+'/'+String(d).padStart(2,'0');
     const dow = new Date(year, month-1, d).getDay();
     const dowcls = dow===0?'sun':dow===6?'sat':'';
-    if (confirmed.has(ds)) { html += `<div class="cell fixed">${d}</div>`; continue; }
+    if (confMap.has(ds)) {
+      const h = confMap.get(ds);
+      const bd = HLABEL[h] ? `<span class="hb">${HLABEL[h]}</span>` : '';
+      html += `<div class="cell fixed ${HLABEL[h]?'half':''}">${d}${bd}</div>`; continue;
+    }
     if (ds < todayStr) { html += `<div class="cell past ${dowcls}">${d}</div>`; continue; } // 過去日は選択不可
-    const on = sel.has(ds);
-    html += `<div class="cell ${on?'req':''} ${dowcls}" onclick="toggle('${ds}')">${d}</div>`;
+    const h = sel.get(ds);
+    const cls = h ? ('req ' + (HLABEL[h] ? 'half' : '')) : '';
+    const bd = (h && HLABEL[h]) ? `<span class="hb">${HLABEL[h]}</span>` : '';
+    html += `<div class="cell ${cls} ${dowcls}" onclick="toggle('${ds}')">${d}${bd}</div>`;
   }
   document.getElementById('grid').innerHTML = html;
   const c = document.getElementById('count');
-  const total = confCount + sel.size;       // 確定＋希望 で上限判定
+  let selDays = 0; sel.forEach(h => selDays += HW(h));
+  const total = confDays + selDays;       // 確定＋希望 の消費日数で上限判定
   const over = total > data.limit;
-  c.textContent = '公休 確定' + confCount + '＋希望' + sel.size + ' ／ 上限' + data.limit + '日';
+  c.textContent = '公休 確定' + confDays + '＋希望' + selDays + ' ／ 上限' + data.limit + '日';
   c.className = 'count' + (over ? ' over' : '');
   document.getElementById('submitBtn').disabled = over;
 }
 
+// タップで 全休 → 午前 → 午後 → 解除 を循環
 function toggle(ds) {
-  if (sel.has(ds)) sel.delete(ds); else sel.add(ds);
+  const cur = sel.get(ds);
+  if (!cur) sel.set(ds, '全休');
+  else if (cur === '全休') sel.set(ds, '午前');
+  else if (cur === '午前') sel.set(ds, '午後');
+  else sel.delete(ds);
   render();
 }
 
 async function submit() {
   showMsg('info', '送信中...');
-  const d = await api({ type:'submit_kibou', dates: Array.from(sel).sort(), year, month });
+  const dates = Array.from(sel.entries()).map(([d,h]) => ({ d, h })).sort((a,b) => a.d < b.d ? -1 : 1);
+  const d = await api({ type:'submit_kibou', dates, year, month });
   if (d.success) {
-    showMsg('success', '休み希望を送信しました（' + d.count + '日）。管理者の確認をお待ちください。');
+    showMsg('success', '休み希望を送信しました（' + (d.days != null ? d.days : d.count) + '日分）。管理者の確認をお待ちください。');
     setTimeout(() => { try { liff.closeWindow(); } catch(e){} }, 1800);
   } else showMsg('error', d.message);
 }

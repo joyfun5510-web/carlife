@@ -121,9 +121,12 @@ function openDay(dn) {
   const off  = day.off.length ? day.off.map(n=> onLeave.indexOf(n)>=0
       ? `<span class="chip leave">${n}（有給）</span>`
       : `<span class="chip off">${n}</span>`).join('') : '<span style="color:#aaa;font-size:13px;">なし</span>';
-  const halfLeave = day.halfLeave || [];
-  const halfHtml = halfLeave.length
-    ? `<div class="grp-title">🕐 半休（${halfLeave.length}人）</div><div class="chips">${halfLeave.map(n=>`<span class="chip leave">${n}</span>`).join('')}</div>`
+  const halfLeave = day.halfLeave || [];        // 有給の半休（半日勤務）
+  const halfKoukyuu = day.halfKoukyuu || [];    // 公休の半休（半日勤務）
+  const halfItems = halfLeave.map(n=>`<span class="chip leave">${n}・有給</span>`)
+    .concat(halfKoukyuu.map(n=>`<span class="chip off">${n}・公休</span>`));
+  const halfHtml = halfItems.length
+    ? `<div class="grp-title">🕐 半休（${halfItems.length}人）</div><div class="chips">${halfItems.join('')}</div>`
     : '';
   document.getElementById('sheetBody').innerHTML =
     `<div class="grp-title">🟢 出勤予定（${day.working.length}人）</div><div class="chips">${work}</div>` +

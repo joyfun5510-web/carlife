@@ -240,7 +240,10 @@
     border-radius: 8px; font-size: 14px; cursor: pointer; border: 1.5px solid #e0e0e0;
     background: #E3F2FD; color: #1565C0; user-select: none;
   }
+  .k-cell { position: relative; flex-direction: column; }
   .k-cell.off { background: #ECEFF1; color: #607D8B; border-color: #cfd8dc; font-weight: bold; }
+  .k-cell.half { background: #F5F5F5; border-style: dashed; color: #607D8B; }
+  .k-cell .khb { font-size: 9px; line-height: 1; margin-top: 1px; padding: 1px 3px; border-radius: 4px; background: #607D8B; color: #fff; font-weight: bold; }
   .k-cell.req-kibou { box-shadow: 0 0 0 2px #7E57C2 inset; }
   .k-cell.blank { background: transparent; border: none; cursor: default; }
   .k-cell.today { box-shadow: 0 0 0 2px #FF9800 inset; }
@@ -342,7 +345,8 @@
       </div>
       <div class="msg" id="kMsg" style="display:none;margin-top:10px;"></div>
       <div style="font-size:11px;color:#999;margin-top:10px;line-height:1.6;">
-        ・休みにする日をタップ（青＝出勤予定／灰＝公休／紫枠＝本人の休み希望）<br>
+        ・日をタップで切替（青＝出勤予定／灰＝公休／点線＝半休／紫枠＝本人の休み希望）<br>
+        ・タップごとに 出勤 → 全休 → 午前半休(前) → 午後半休(後) → 出勤 と循環。半休は0.5日。<br>
         ・「希望を反映」で本人の希望日を取り込み→修正→「確定保存」<br>
         ・正社員は月6日・パートは最大15日が目安。12月/1月は自由でOK。
       </div>
@@ -752,7 +756,7 @@ function reflectKibou() {
   const empId = document.getElementById('kEmployee').value;
   const kibouArr = kData.kibou ? (kData.kibou[empId] || []) : [];
   if (kibouArr.length === 0) { showKMsg('info', 'この社員の休み希望はまだ届いていません'); return; }
-  kibouArr.forEach(d => kWorking[empId].add(d));
+  kibouArr.forEach(x => kWorking[empId].set(x.d, x.h || '全休'));
   renderKoukyuuCalendar();
   showKMsg('info', '希望 ' + kibouArr.length + '日を取り込みました。確認後「確定保存」してください。');
 }
@@ -848,8 +852,8 @@ async function loadKoukyuu() {
   const prev = sel.value;
   sel.innerHTML = data.employees.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
   if (prev && data.employees.some(e => e.id === prev)) sel.value = prev;
-  kWorking = {};
-  data.employees.forEach(e => { kWorking[e.id] = new Set(data.koukyuu[e.id] || []); });
+  kWorking = {};  // empId -> Map(ds -> '全休'|'午前'|'午後')
+  data.employees.forEach(e => { kWorking[e.id] = new Map((data.koukyuu[e.id] || []).map(x => [x.d, x.h || '全休'])); });
   document.getElementById('kMonthLabel').textContent = kYear + '年 ' + kMonth + '月';
   renderKoukyuuCalendar();
 }
@@ -861,18 +865,21 @@ function koukyuuMonth(delta) {
   loadKoukyuu();
 }
 
+const KHW = h => (h === '午前' || h === '午後') ? 0.5 : 1;     // 消費日数
+const KHLABEL = { '午前': '前', '午後': '後' };
+
 function renderKoukyuuCalendar() {
   if (!kData) return;
   const empId = document.getElementById('kEmployee').value;
-  const set = kWorking[empId] || new Set();
+  const map = kWorking[empId] || new Map();
   const dim = kData.daysInMonth;
   const first = new Date(kYear, kMonth - 1, 1).getDay();
   const n = new Date();
   const todayStr = n.getFullYear() + '/' + String(n.getMonth() + 1).padStart(2, '0') + '/' + String(n.getDate()).padStart(2, '0');
   const DOW = ['日', '月', '火', '水', '木', '金', '土'];
 
-  // 休み希望（未反映分）
-  const kibouSet = new Set((kData.kibou && kData.kibou[empId]) || []);
+  // 休み希望（未反映分）：ds -> h
+  const kibouMap = new Map(((kData.kibou && kData.kibou[empId]) || []).map(x => [x.d, x.h || '全休']));
   // 上限
   const limit = (kData.types && kData.types[empId] === 'パート') ? 15 : 6;
 
@@ -880,35 +887,44 @@ function renderKoukyuuCalendar() {
   for (let i = 0; i < first; i++) html += `<div class="k-cell blank"></div>`;
   for (let d = 1; d <= dim; d++) {
     const ds = kYear + '/' + String(kMonth).padStart(2, '0') + '/' + String(d).padStart(2, '0');
-    const off = set.has(ds);
-    const isKibou = !off && kibouSet.has(ds);
+    const h = map.get(ds);
+    const off = !!h;
+    const isKibou = !off && kibouMap.has(ds);
     const today = ds === todayStr;
-    html += `<div class="k-cell ${off ? 'off' : ''} ${isKibou ? 'req-kibou' : ''} ${today ? 'today' : ''}" onclick="toggleKoukyuu('${ds}')">${d}</div>`;
+    const half = off && KHLABEL[h];
+    const bd = half ? `<span class="khb">${KHLABEL[h]}</span>` : '';
+    html += `<div class="k-cell ${off ? 'off' : ''} ${half ? 'half' : ''} ${isKibou ? 'req-kibou' : ''} ${today ? 'today' : ''}" onclick="toggleKoukyuu('${ds}')">${d}${bd}</div>`;
   }
   document.getElementById('kCalendar').innerHTML = html;
-  const limit_label = limit === 15 ? '（パート・最大15日）' : set.size === limit ? '（標準）' : '';
-  document.getElementById('kCount').textContent = '公休 ' + set.size + '日 / 上限' + limit + '日 ' + limit_label;
+  let days = 0; map.forEach(h => days += KHW(h));
+  const limit_label = limit === 15 ? '（パート・最大15日）' : days === limit ? '（標準）' : '';
+  document.getElementById('kCount').textContent = '公休 ' + days + '日 / 上限' + limit + '日 ' + limit_label;
 
   // 希望メモ
-  const unpicked = Array.from(kibouSet).filter(d => !set.has(d));
+  const unpicked = Array.from(kibouMap.keys()).filter(d => !map.has(d));
   document.getElementById('kKibouNote').textContent = unpicked.length > 0 ? '💜 休み希望あり（未反映 ' + unpicked.length + '日）— 「希望を反映」で取り込めます' : '';
 }
 
+// タップで 出勤 → 全休 → 午前 → 午後 → 出勤 を循環
 function toggleKoukyuu(ds) {
   const empId = document.getElementById('kEmployee').value;
-  const set = kWorking[empId];
-  if (!set) return;
-  if (set.has(ds)) set.delete(ds); else set.add(ds);
+  const map = kWorking[empId];
+  if (!map) return;
+  const cur = map.get(ds);
+  if (!cur) map.set(ds, '全休');
+  else if (cur === '全休') map.set(ds, '午前');
+  else if (cur === '午前') map.set(ds, '午後');
+  else map.delete(ds);
   renderKoukyuuCalendar();
 }
 
 async function saveKoukyuuChanges() {
   const empId = document.getElementById('kEmployee').value;
   if (!empId) return;
-  const dates = Array.from(kWorking[empId] || []).sort();
+  const dates = Array.from(kWorking[empId] || new Map()).map(([d, h]) => ({ d, h })).sort((a, b) => a.d < b.d ? -1 : 1);
   showKMsg('info', '保存中...');
   const data = await api({ type: 'save_koukyuu', employeeId: empId, dates, year: kYear, month: kMonth });
-  if (data.success) showKMsg('success', '保存しました（公休 ' + data.count + '日）');
+  if (data.success) showKMsg('success', '保存しました（公休 ' + data.count + '件）');
   else showKMsg('error', data.message);
 }
 
