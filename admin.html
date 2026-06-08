@@ -393,6 +393,16 @@
         ・実際の給与計算は会計ソフトで行ってください
       </div>
     </div>
+
+    <div class="card" style="margin-top:14px;">
+      <div class="card-title">📥 月次集計CSV（全社員）</div>
+      <div style="font-size:12px;color:#555;margin-bottom:10px;line-height:1.6;">
+        上で選択中の月（<span id="csvMonthLabel">—</span>）の全社員の集計CSVを<b>メールで送信</b>します。<br>
+        項目：社員ID／氏名／雇用形態／出勤日数／総勤務時間／平日・土曜・日祝勤務時間／公休日数／有給取得日数／欠勤日数（半休0.5換算）。
+      </div>
+      <button class="btn-login" style="background:#00897B;font-size:14px;" onclick="emailMonthlyCsv()">✉️ この月のCSVをメール送信</button>
+      <div class="msg" id="csvMsg" style="display:none;margin-top:10px;"></div>
+    </div>
   </div>
 
   <!-- 勤怠修正タブ（管理者の代理打刻・修正） -->
@@ -772,7 +782,27 @@ function payMonth(delta) {
   payMonth2 += delta;
   if (payMonth2 > 12) { payMonth2 = 1; payYear++; }
   if (payMonth2 < 1)  { payMonth2 = 12; payYear--; }
-  document.getElementById('payMonthLabel').textContent = payYear + '年 ' + payMonth2 + '月';
+  updatePayMonthLabels();
+}
+function updatePayMonthLabels() {
+  const t = payYear + '年 ' + payMonth2 + '月';
+  document.getElementById('payMonthLabel').textContent = t;
+  const c = document.getElementById('csvMonthLabel');
+  if (c) c.textContent = t;
+}
+async function emailMonthlyCsv() {
+  if (!payYear) payMonthInit();
+  const msg = document.getElementById('csvMsg');
+  msg.className = 'msg info'; msg.style.display = 'block';
+  msg.textContent = '送信中...';
+  const d = await api({ type: 'email_monthly_summary', year: payYear, month: payMonth2 });
+  if (d.success) {
+    msg.className = 'msg success';
+    msg.textContent = '✅ ' + d.year + '年' + d.month + '月の集計（' + d.count + '名）を ' + d.sentTo + ' に送信しました';
+  } else {
+    msg.className = 'msg error';
+    msg.textContent = 'エラー：' + d.message;
+  }
 }
 async function loadPayroll() {
   if (!payYear) payMonthInit();
@@ -1029,7 +1059,8 @@ function switchTab(name) {
   document.getElementById('tab-' + name).classList.add('active');
   if (name === 'koukyuu' && !kData) loadKoukyuu();
   if (name === 'payroll') {
-    if (!payYear) { payMonthInit(); document.getElementById('payMonthLabel').textContent = payYear + '年 ' + payMonth2 + '月'; }
+    if (!payYear) payMonthInit();
+    updatePayMonthLabels();
   }
   if (name === 'empset' && !empSetData) loadEmpSettings();
   if (name === 'attedit' && !aeData) loadAttEdit();
