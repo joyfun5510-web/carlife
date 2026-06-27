@@ -179,6 +179,20 @@
     </div>
   </div>
 
+  <!-- 初回登録（新人の本人スマホ紐付け） -->
+  <div class="step" id="stepRegister">
+    <div class="notice-card">
+      <div class="notice-icon">📝</div>
+      <div class="notice-title">初回登録</div>
+      <div class="notice-text" style="margin-bottom:16px;">
+        はじめての打刻です。<br>あなたのお名前を選んで登録してください。
+      </div>
+      <select id="regSelect" style="width:100%;padding:14px;border:1px solid #ccc;border-radius:10px;font-size:16px;margin-bottom:14px;"></select>
+      <button class="btn-back" style="background:#2E7D32;" id="regBtn" onclick="doRegister()">この名前で登録する</button>
+      <div id="regMsg" style="font-size:13px;color:#c00;margin-top:12px;min-height:18px;"></div>
+    </div>
+  </div>
+
   <!-- お知らせ（役員・未登録） -->
   <div class="step" id="stepNotice">
     <div class="notice-card">
@@ -229,6 +243,7 @@ async function loadStatus() {
   showLoading(true);
   try {
     const data = await api({ type: 'get_today_status', userId });
+    if (data.notRegistered) { await showRegisterStep(); return; }
     if (!data.success) { showNotice('⚠️', '打刻できません', data.message); return; }
     if (data.noPunch)  { showNotice('👔', data.name + ' さん', '役員のため打刻対象外です。\n管理者メニューをご利用ください。'); return; }
     showActionStep(data);
@@ -309,6 +324,41 @@ function showResult(type, data) {
       `勤務時間：<strong>${data.hours} 時間</strong>`;
   }
   showStep('stepResult');
+}
+
+// ===== 初回登録（本人スマホ紐付け） =====
+async function showRegisterStep() {
+  const d = await api({ type: 'get_unbound_employees' });
+  const sel = document.getElementById('regSelect');
+  const btn = document.getElementById('regBtn');
+  const list = (d && d.success) ? d.employees : [];
+  if (!list.length) {
+    showNotice('ℹ️', '登録待ちがありません',
+      'あなたの登録枠がまだありません。\n管理者に「社員の追加」を依頼してください。');
+    return;
+  }
+  sel.innerHTML = '<option value="">― 名前を選んでください ―</option>' +
+    list.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
+  btn.disabled = false;
+  document.getElementById('regMsg').textContent = '';
+  showStep('stepRegister');
+}
+
+async function doRegister() {
+  const empId = document.getElementById('regSelect').value;
+  const name  = document.getElementById('regSelect').selectedOptions[0].textContent;
+  const msg   = document.getElementById('regMsg');
+  if (!empId) { msg.textContent = '名前を選んでください'; return; }
+  if (!confirm('あなたは「' + name + '」さんですか？\nこの登録はあなたのスマホと結びつきます。')) return;
+  showLoading(true);
+  try {
+    const d = await api({ type: 'bind_my_line_id', userId, employeeId: empId });
+    if (!d.success) { msg.textContent = d.message || '登録に失敗しました'; showLoading(false); return; }
+    await loadStatus();   // 登録完了 → 通常の打刻画面へ
+  } catch (e) {
+    msg.textContent = '通信エラーが発生しました';
+    showLoading(false);
+  }
 }
 
 function showNotice(icon, title, text) {

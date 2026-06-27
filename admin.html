@@ -487,12 +487,44 @@
     </div>
   </div>
 
-  <!-- 社員設定タブ（雇用形態・時給） -->
+  <!-- 社員設定タブ（雇用形態・入社追加・退職） -->
   <div class="tab-panel" id="tab-empset">
     <div class="card">
-      <div class="card-title">⚙ 社員設定（雇用形態）</div>
+      <div class="card-title">➕ 新規社員を追加</div>
+      <label style="font-size:13px;color:#555;">氏名 <span style="color:#c00;">*</span></label>
+      <input type="text" id="neName" class="k-select" placeholder="例：山田">
+      <div style="display:flex;gap:10px;">
+        <div style="flex:1;">
+          <label style="font-size:13px;color:#555;">雇用形態</label>
+          <select id="neType" class="k-select">
+            <option value="正社員">正社員</option>
+            <option value="パート">パート</option>
+          </select>
+        </div>
+        <div style="flex:1;">
+          <label style="font-size:13px;color:#555;">年間有給日数</label>
+          <input type="number" id="neAnnual" class="k-select" value="0" min="0" max="40">
+        </div>
+      </div>
+      <label style="font-size:13px;color:#555;">入社日（任意）</label>
+      <input type="date" id="neHire" class="k-select">
+      <button class="btn-login" style="background:#1565C0;margin-top:6px;" onclick="addEmployee()">➕ 追加する</button>
+      <div class="msg" id="neMsg" style="display:none;margin-top:10px;"></div>
+      <div style="font-size:11px;color:#999;margin-top:10px;line-height:1.7;">
+        ・追加後、本人がLINEの「打刻」を開くと<strong>初回登録画面</strong>が出ます。自分の名前を選べばスマホが紐付きます<br>
+        ・社員IDは自動で採番されます（PIN不要）
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">⚙ 在籍社員</div>
       <div id="empSetList"></div>
       <div class="msg" id="empSetMsg" style="display:none;margin-top:10px;"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">📦 退職者（履歴は保持）</div>
+      <div id="empRetiredList"></div>
     </div>
   </div>
 
@@ -879,24 +911,84 @@ async function loadPayroll() {
 // ============================================================
 let empSetData = null;
 async function loadEmpSettings() {
-  const d = await api({ type: 'get_employees_admin' });
+  const d = await api({ type: 'get_employees_full' });
   if (!d.success) return;
   empSetData = d.employees;
   renderEmpSettings();
 }
 function renderEmpSettings() {
   if (!empSetData) return;
-  const items = empSetData.map(e => `
+  const active  = empSetData.filter(e => e.active);
+  const retired = empSetData.filter(e => !e.active);
+
+  // 在籍社員
+  document.getElementById('empSetList').innerHTML = active.map(e => {
+    const bind = e.isAdmin ? '' :
+      (e.hasLineId ? '<span style="font-size:11px;color:#2E7D32;">✅ スマホ紐付け済</span>'
+                   : '<span style="font-size:11px;color:#ef6c00;">⏳ 未紐付け（本人が打刻を開くと登録）</span>');
+    const retireBtn = e.isAdmin ? '' :
+      `<button onclick="retireEmployee('${e.id}','${e.name}')" style="background:#fff;border:1px solid #e57373;color:#c62828;border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;">退職</button>`;
+    return `
     <div style="border:1px solid #eee;border-radius:10px;padding:14px;margin-bottom:10px;">
-      <div style="font-weight:bold;margin-bottom:8px;">${e.name}${e.isAdmin ? '（役員）' : ''}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <div style="font-weight:bold;">${e.name}${e.isAdmin ? '（役員）' : ''}</div>
+        ${retireBtn}
+      </div>
       <label style="font-size:12px;color:#777;">雇用形態</label>
       <select id="et_${e.id}" onchange="saveEmpSettings('${e.id}')" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:14px;">
         <option value="正社員" ${e.empType==='正社員'?'selected':''}>正社員</option>
         <option value="パート" ${e.empType==='パート'?'selected':''}>パート</option>
       </select>
-    </div>`).join('');
-  document.getElementById('empSetList').innerHTML = items;
+      <div style="margin-top:6px;">${bind}</div>
+    </div>`;
+  }).join('');
+
+  // 退職者
+  const rl = document.getElementById('empRetiredList');
+  rl.innerHTML = retired.length === 0
+    ? '<div style="color:#999;font-size:13px;">退職者はいません</div>'
+    : retired.map(e => `
+      <div style="display:flex;justify-content:space-between;align-items:center;border:1px solid #eee;border-radius:10px;padding:12px 14px;margin-bottom:8px;color:#888;">
+        <div>${e.name}</div>
+        <button onclick="reactivateEmployee('${e.id}','${e.name}')" style="background:#fff;border:1px solid #90A4AE;color:#546E7A;border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;">復帰</button>
+      </div>`).join('');
 }
+
+async function addEmployee() {
+  const name   = document.getElementById('neName').value.trim();
+  const empType= document.getElementById('neType').value;
+  const annual = document.getElementById('neAnnual').value;
+  const hire   = document.getElementById('neHire').value; // yyyy-MM-dd
+  const msg = document.getElementById('neMsg');
+  if (!name) { msg.className='msg error'; msg.textContent='氏名を入力してください'; msg.style.display='block'; return; }
+  msg.className='msg'; msg.style.color='#555'; msg.textContent='追加中...'; msg.style.display='block';
+  const d = await api({ type:'add_employee', name, empType, annualDays:Number(annual)||0, hireDate: hire ? hire.replace(/-/g,'/') : '' });
+  if (!d.success) { msg.className='msg error'; msg.textContent='エラー：'+d.message; return; }
+  msg.className='msg success'; msg.textContent='✅ '+d.name+'（'+d.id+'）を追加しました。本人がLINEの打刻を開いて名前を選ぶと紐付きます。';
+  document.getElementById('neName').value=''; document.getElementById('neAnnual').value='0'; document.getElementById('neHire').value='';
+  await loadEmpSettings();
+}
+
+async function retireEmployee(empId, name) {
+  if (!confirm(name+' さんを退職にします。\n（打刻・集計の対象外になりますが、過去の記録は残ります）\nよろしいですか？')) return;
+  const d = await api({ type:'retire_employee', employeeId: empId });
+  const msg = document.getElementById('empSetMsg');
+  msg.className='msg '+(d.success?'success':'error');
+  msg.textContent = d.success ? '✅ '+name+' さんを退職にしました' : 'エラー：'+d.message;
+  msg.style.display='block';
+  if (d.success) await loadEmpSettings();
+}
+
+async function reactivateEmployee(empId, name) {
+  if (!confirm(name+' さんを在籍（復帰）に戻します。よろしいですか？')) return;
+  const d = await api({ type:'reactivate_employee', employeeId: empId });
+  const msg = document.getElementById('empSetMsg');
+  msg.className='msg '+(d.success?'success':'error');
+  msg.textContent = d.success ? '✅ '+name+' さんを復帰しました' : 'エラー：'+d.message;
+  msg.style.display='block';
+  if (d.success) await loadEmpSettings();
+}
+
 async function saveEmpSettings(empId) {
   const et = document.getElementById('et_' + empId).value;
   // 時給は会計ソフトで計算するため雇用形態のみ保存（時給は0で維持）
