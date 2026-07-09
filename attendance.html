@@ -107,6 +107,42 @@
     cursor: pointer;
   }
 
+  /* 急な休み */
+  .absence-link-wrap { text-align: center; margin-top: 22px; }
+  .absence-link {
+    display: inline-block;
+    color: #8a8a8a;
+    font-size: 12.5px;
+    text-decoration: underline;
+    padding: 8px 4px;
+    cursor: pointer;
+  }
+  .absence-badge {
+    background: #FFF3E0; color: #E65100;
+    border-radius: 10px; padding: 10px 14px;
+    font-size: 13px; line-height: 1.6; margin-top: 14px; text-align: left;
+  }
+  .absence-panel {
+    background: white;
+    border-radius: 16px;
+    padding: 20px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+    margin-top: 16px;
+  }
+  .absence-panel .absence-title { font-size: 15px; font-weight: bold; color: #B71C1C; margin-bottom: 4px; }
+  .absence-panel .absence-desc { font-size: 12.5px; color: #777; margin-bottom: 12px; line-height: 1.6; }
+  .absence-panel textarea {
+    width: 100%; min-height: 70px; padding: 12px; border: 1px solid #ccc; border-radius: 10px;
+    font-size: 15px; font-family: inherit; resize: vertical;
+  }
+  .absence-panel .absence-btns { display: flex; gap: 10px; margin-top: 12px; }
+  .btn-absence-cancel, .btn-absence-send {
+    flex: 1; padding: 13px 0; border: none; border-radius: 10px; font-size: 14px; font-weight: bold; cursor: pointer;
+  }
+  .btn-absence-cancel { background: #eee; color: #555; }
+  .btn-absence-send   { background: #B71C1C; color: white; }
+  .btn-absence-send:disabled { opacity: 0.45; }
+
   /* お知らせ（役員/未登録） */
   .notice-card {
     background: white;
@@ -166,6 +202,22 @@
         <span class="icon">🔴</span>
         <span class="label">退勤</span>
       </button>
+    </div>
+
+    <div id="absenceBadge" style="display:none;"></div>
+
+    <div class="absence-link-wrap" id="absenceLinkWrap" style="display:none;">
+      <span class="absence-link" onclick="openAbsencePanel()">🚨 今日は急に休みます</span>
+    </div>
+
+    <div class="absence-panel" id="absencePanel" style="display:none;">
+      <div class="absence-title">急なお休み連絡</div>
+      <div class="absence-desc">送信すると本日は欠勤として登録され、本日出勤予定のスタッフと役員にLINEで通知されます。取り消しはできません。</div>
+      <textarea id="absenceReason" placeholder="理由を入力してください（例：体調不良、家庭の事情など）"></textarea>
+      <div class="absence-btns">
+        <button class="btn-absence-cancel" onclick="closeAbsencePanel()">キャンセル</button>
+        <button class="btn-absence-send" id="absenceSendBtn" onclick="sendAbsence()">送信する</button>
+      </div>
     </div>
   </div>
 
@@ -275,7 +327,55 @@ function showActionStep(data) {
   document.getElementById('btnIn').disabled  = (data.status !== 'not_clocked_in');
   document.getElementById('btnOut').disabled = (data.status !== 'clocked_in');
 
+  // 急な休み：本日まだ出勤打刻していない場合のみリンクを出す。登録済みならバッジ表示に切替。
+  const badgeEl = document.getElementById('absenceBadge');
+  const linkWrap = document.getElementById('absenceLinkWrap');
+  closeAbsencePanel();
+  if (data.absenceReason) {
+    badgeEl.style.display = 'block';
+    badgeEl.className = 'absence-badge';
+    badgeEl.innerHTML = '🚨 本日はお休み登録済みです<br>理由：' + escapeHtml(data.absenceReason);
+    linkWrap.style.display = 'none';
+  } else {
+    badgeEl.style.display = 'none';
+    linkWrap.style.display = (data.status === 'not_clocked_in') ? 'block' : 'none';
+  }
+
   showStep('stepAction');
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ===== 急な休み =====
+function openAbsencePanel() {
+  document.getElementById('absenceReason').value = '';
+  document.getElementById('absencePanel').style.display = 'block';
+  document.getElementById('absenceLinkWrap').style.display = 'none';
+}
+function closeAbsencePanel() {
+  document.getElementById('absencePanel').style.display = 'none';
+}
+
+async function sendAbsence() {
+  const reason = document.getElementById('absenceReason').value.trim();
+  if (!reason) { alert('理由を入力してください'); return; }
+  if (!confirm('本日を休みにします。よろしいですか？\n理由：' + reason + '\n\n出勤予定のスタッフと役員にLINEで通知されます。')) return;
+
+  const btn = document.getElementById('absenceSendBtn');
+  btn.disabled = true;
+  showLoading(true);
+  try {
+    const data = await api({ type: 'submit_sudden_absence', userId, reason });
+    if (!data.success) { alert(data.message || '送信に失敗しました'); return; }
+    await loadStatus();
+  } catch (e) {
+    alert('通信エラーが発生しました。再度お試しください。');
+  } finally {
+    btn.disabled = false;
+    showLoading(false);
+  }
 }
 
 // ===== 位置情報取得（記録のみ・拒否されても打刻は通す） =====
