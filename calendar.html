@@ -867,11 +867,11 @@ async function loadMyPay() {
     myPay = p;
     const yen = n => '¥' + (Number(n) || 0).toLocaleString('ja-JP');
 
-    // 手取り目安（控除率が設定されている場合のみ）
-    const netHtml = p.deductRate ? `
+    // 手取り目安（控除設定がある場合のみ）
+    const netHtml = (p.deductRate || p.fixedDeduct) ? `
       <div class="pc-net">
         <div>手取り目安 <b style="color:#2E7D32;">${yen(p.netCurrentPay)}</b></div>
-        <div>見込 <b style="color:#1565C0;">${yen(p.netProjectedPay)}</b></div>
+        <div>見込（手取り）<b style="color:#1565C0;">${yen(p.netProjectedPay)}</b></div>
       </div>` : '';
 
     // 月額目標（本人設定）
@@ -905,7 +905,7 @@ async function loadMyPay() {
         </div>
         ${netHtml}
         ${goalHtml}
-        <div class="pc-sub">勤務 ${p.totalHours}h ・ 出勤${p.workedDays}日<br>※このまま予定通り出た場合の見込みです（額面＝税・社会保険の控除前の目安）</div>
+        <div class="pc-sub">勤務 ${p.totalHours}h ・ 出勤${p.workedDays}日<br><b style="color:#E65100;">※金額はすべて“あくまで目安”です。</b>見込は予定通り出た場合の概算、手取りも概算のため、実際の支給額とは異なる場合があります。</div>
       </div>`;
   } catch (e) {
     box.innerHTML = ''; // 給与カードは失敗しても本体に影響させない

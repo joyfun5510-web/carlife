@@ -438,8 +438,9 @@
       <div style="font-size:11px;color:#999;margin-top:10px;line-height:1.7;">
         ・<b>現在の給与</b>＝今月これまでの打刻（区分別時間×時給）の額面（目安）<br>
         ・<b>月末見込</b>＝出勤日の平均 ×「公休以外の予定出勤日数」。公休をカレンダーに登録している前提の概算です<br>
-        ・いずれも<b>税・社会保険の控除前</b>の目安。確定計算は会計ソフトで行ってください<br>
-        ・時給は「⚙社員」タブで設定します
+        ・<b>手取り目安</b>＝額面 −固定控除額（社保）−額面×控除率（雇用保険等）。<b>源泉所得税は未算入のあくまで概算</b>で、実際の支給額とは異なります<br>
+        ・<b>いずれも“あくまで目安”</b>です。確定計算は会計ソフトで行ってください<br>
+        ・時給・控除は「⚙社員」タブで設定します
       </div>
     </div>
 
@@ -960,11 +961,13 @@ function renderEmpSettings() {
           <div style="flex:1;"><label style="font-size:11px;color:#999;">日祝</label>
             <input type="number" id="wl_${e.id}" value="${e.wageSunHol||0}" min="0" step="10" onchange="saveEmpWage('${e.id}')" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:6px;font-size:14px;box-sizing:border-box;"></div>
         </div>
-        <div style="margin-top:8px;display:flex;align-items:flex-end;gap:8px;">
-          <div style="width:120px;"><label style="font-size:11px;color:#999;">控除率（％）</label>
-            <input type="number" id="wr_${e.id}" value="${e.deductRate||0}" min="0" max="100" step="0.5" onchange="saveEmpWage('${e.id}')" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:6px;font-size:14px;box-sizing:border-box;"></div>
-          <div style="font-size:10px;color:#aaa;line-height:1.5;padding-bottom:4px;">手取り目安の計算用<br>額面×(1−率)</div>
-        </div>${targetLine}
+        <div style="margin-top:8px;display:flex;gap:6px;">
+          <div style="flex:1;"><label style="font-size:11px;color:#999;">固定控除額（円・社保など）</label>
+            <input type="number" id="wf_${e.id}" value="${e.fixedDeduct||0}" min="0" step="100" onchange="saveEmpWage('${e.id}')" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:6px;font-size:14px;box-sizing:border-box;"></div>
+          <div style="width:110px;"><label style="font-size:11px;color:#999;">控除率（％・雇用保険等）</label>
+            <input type="number" id="wr_${e.id}" value="${e.deductRate||0}" min="0" max="100" step="0.1" onchange="saveEmpWage('${e.id}')" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:6px;font-size:14px;box-sizing:border-box;"></div>
+        </div>
+        <div style="font-size:10px;color:#aaa;line-height:1.5;margin-top:4px;">手取り目安 ＝ 額面 − 固定控除額（社保）− 額面×控除率（雇用保険0.6%等）</div>${targetLine}
       </div>` : '';
     return `
     <div style="border:1px solid #eee;border-radius:10px;padding:14px;margin-bottom:10px;">
@@ -1046,14 +1049,16 @@ async function saveEmpWage(empId) {
   const wk = document.getElementById('wk_' + empId).value;
   const wl = document.getElementById('wl_' + empId).value;
   const wr = document.getElementById('wr_' + empId).value;
+  const wf = document.getElementById('wf_' + empId).value;
   const d = await api({ type: 'save_employee_settings', employeeId: empId, empType: et,
-    wageWeekday: Number(wj)||0, wageSat: Number(wk)||0, wageSunHol: Number(wl)||0, deductRate: Number(wr)||0 });
+    wageWeekday: Number(wj)||0, wageSat: Number(wk)||0, wageSunHol: Number(wl)||0,
+    deductRate: Number(wr)||0, fixedDeduct: Number(wf)||0 });
   const msg = document.getElementById('empSetMsg');
   msg.className = 'msg ' + (d.success ? 'success' : 'error');
-  msg.textContent = d.success ? '✅ ' + (empSetData.find(e=>e.id===empId)||{}).name + ' の時給・控除率を保存しました' : 'エラー：' + d.message;
+  msg.textContent = d.success ? '✅ ' + (empSetData.find(e=>e.id===empId)||{}).name + ' の時給・控除設定を保存しました' : 'エラー：' + d.message;
   msg.style.display = 'block';
   if (d.success) { const t = empSetData.find(e=>e.id===empId);
-    if (t) { t.wageWeekday=Number(wj)||0; t.wageSat=Number(wk)||0; t.wageSunHol=Number(wl)||0; t.deductRate=Number(wr)||0; } }
+    if (t) { t.wageWeekday=Number(wj)||0; t.wageSat=Number(wk)||0; t.wageSunHol=Number(wl)||0; t.deductRate=Number(wr)||0; t.fixedDeduct=Number(wf)||0; } }
 }
 
 // ============================================================
