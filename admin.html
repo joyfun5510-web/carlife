@@ -427,7 +427,7 @@
   <!-- 勤務時間集計タブ（パート） -->
   <div class="tab-panel" id="tab-payroll">
     <div class="card">
-      <div class="card-title">💴 パート勤務時間集計</div>
+      <div class="card-title">💴 パート給与（現在・月末見込）</div>
       <div class="k-monthnav">
         <button class="k-navbtn" onclick="payMonth(-1)">‹</button>
         <strong id="payMonthLabel">—</strong>
@@ -435,9 +435,11 @@
       </div>
       <button class="btn-login" style="margin:10px 0;font-size:14px;" onclick="loadPayroll()">🔄 集計する</button>
       <div id="payTable"></div>
-      <div style="font-size:11px;color:#999;margin-top:10px;line-height:1.6;">
-        ・区分別（平日／土曜／日祝）の勤務時間と合計を表示します<br>
-        ・実際の給与計算は会計ソフトで行ってください
+      <div style="font-size:11px;color:#999;margin-top:10px;line-height:1.7;">
+        ・<b>現在の給与</b>＝今月これまでの打刻（区分別時間×時給）の額面（目安）<br>
+        ・<b>月末見込</b>＝出勤日の平均 ×「公休以外の予定出勤日数」。公休をカレンダーに登録している前提の概算です<br>
+        ・いずれも<b>税・社会保険の控除前</b>の目安。確定計算は会計ソフトで行ってください<br>
+        ・時給は「⚙社員」タブで設定します
       </div>
     </div>
 
@@ -889,21 +891,31 @@ async function loadPayroll() {
   const d = await api({ type: 'get_payroll', year: payYear, month: payMonth2 });
   if (!d.success) { document.getElementById('payTable').innerHTML = '<div style="color:#c00;padding:8px;">' + d.message + '</div>'; return; }
   if (!d.payroll.length) {
-    document.getElementById('payTable').innerHTML = '<div style="text-align:center;color:#aaa;padding:16px;">パート社員の打刻記録がありません</div>'; return;
+    document.getElementById('payTable').innerHTML = '<div style="text-align:center;color:#aaa;padding:16px;">パート社員がいません（「⚙社員」タブで雇用形態をパートに設定）</div>'; return;
   }
-  const rows = d.payroll.map(p => `
-    <tr>
-      <td><strong>${p.name}</strong></td>
-      <td>${p.hoursWeekday}h</td>
-      <td>${p.hoursSat}h</td>
-      <td>${p.hoursSunHol}h</td>
-      <td><strong>${p.totalHours}h</strong></td>
-    </tr>`).join('');
-  document.getElementById('payTable').innerHTML = `
-    <table>
-      <thead><tr><th>氏名</th><th>平日</th><th>土曜</th><th>日祝</th><th>合計</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>`;
+  const yen = n => '¥' + (Number(n)||0).toLocaleString('ja-JP');
+  const noWage = p => !(p.wageWeekday || p.wageSat || p.wageSunHol);
+  const cards = d.payroll.map(p => `
+    <div style="border:1px solid #eee;border-radius:12px;padding:14px;margin-bottom:12px;">
+      <div style="font-weight:bold;font-size:15px;margin-bottom:8px;">${p.name}</div>
+      ${noWage(p) ? '<div style="font-size:12px;color:#ef6c00;margin-bottom:8px;">⚠ 時給が未設定です（「⚙社員」タブで設定）</div>' : ''}
+      <div style="display:flex;gap:10px;">
+        <div style="flex:1;background:#f5f7fa;border-radius:10px;padding:10px;text-align:center;">
+          <div style="font-size:11px;color:#888;">今月ここまで</div>
+          <div style="font-size:19px;font-weight:bold;color:#2E7D32;">${yen(p.currentPay)}</div>
+        </div>
+        <div style="flex:1;background:#f5f7fa;border-radius:10px;padding:10px;text-align:center;">
+          <div style="font-size:11px;color:#888;">月末見込</div>
+          <div style="font-size:19px;font-weight:bold;color:#1565C0;">${yen(p.projectedPay)}</div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:#999;margin-top:8px;line-height:1.6;">
+        勤務 <b>${p.totalHours}h</b>（平日${p.hoursWeekday}／土${p.hoursSat}／日祝${p.hoursSunHol}h）
+        ・出勤${p.workedDays}日／予定${p.plannedWorkDays}日<br>
+        時給 平日¥${(p.wageWeekday||0).toLocaleString('ja-JP')}／土¥${(p.wageSat||0).toLocaleString('ja-JP')}／日祝¥${(p.wageSunHol||0).toLocaleString('ja-JP')}
+      </div>
+    </div>`).join('');
+  document.getElementById('payTable').innerHTML = cards;
 }
 
 // ============================================================
@@ -928,6 +940,18 @@ function renderEmpSettings() {
                    : '<span style="font-size:11px;color:#ef6c00;">⏳ 未紐付け（本人が打刻を開くと登録）</span>');
     const retireBtn = e.isAdmin ? '' :
       `<button onclick="retireEmployee('${e.id}','${e.name}')" style="background:#fff;border:1px solid #e57373;color:#c62828;border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;">退職</button>`;
+    const wageBlock = (e.empType === 'パート') ? `
+      <div style="margin-top:10px;padding-top:10px;border-top:1px dashed #eee;">
+        <div style="font-size:12px;color:#777;margin-bottom:4px;">時給（円）</div>
+        <div style="display:flex;gap:6px;">
+          <div style="flex:1;"><label style="font-size:11px;color:#999;">平日</label>
+            <input type="number" id="wj_${e.id}" value="${e.wageWeekday||0}" min="0" step="10" onchange="saveEmpWage('${e.id}')" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:6px;font-size:14px;box-sizing:border-box;"></div>
+          <div style="flex:1;"><label style="font-size:11px;color:#999;">土曜</label>
+            <input type="number" id="wk_${e.id}" value="${e.wageSat||0}" min="0" step="10" onchange="saveEmpWage('${e.id}')" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:6px;font-size:14px;box-sizing:border-box;"></div>
+          <div style="flex:1;"><label style="font-size:11px;color:#999;">日祝</label>
+            <input type="number" id="wl_${e.id}" value="${e.wageSunHol||0}" min="0" step="10" onchange="saveEmpWage('${e.id}')" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:6px;font-size:14px;box-sizing:border-box;"></div>
+        </div>
+      </div>` : '';
     return `
     <div style="border:1px solid #eee;border-radius:10px;padding:14px;margin-bottom:10px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
@@ -935,10 +959,11 @@ function renderEmpSettings() {
         ${retireBtn}
       </div>
       <label style="font-size:12px;color:#777;">雇用形態</label>
-      <select id="et_${e.id}" onchange="saveEmpSettings('${e.id}')" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:14px;">
+      <select id="et_${e.id}" onchange="saveEmpType('${e.id}')" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:14px;">
         <option value="正社員" ${e.empType==='正社員'?'selected':''}>正社員</option>
         <option value="パート" ${e.empType==='パート'?'selected':''}>パート</option>
       </select>
+      ${wageBlock}
       <div style="margin-top:6px;">${bind}</div>
     </div>`;
   }).join('');
@@ -989,14 +1014,31 @@ async function reactivateEmployee(empId, name) {
   if (d.success) await loadEmpSettings();
 }
 
-async function saveEmpSettings(empId) {
+// 雇用形態のみ保存（時給は未指定＝既存値を維持）。パートに変わると時給欄が出るよう再描画。
+async function saveEmpType(empId) {
   const et = document.getElementById('et_' + empId).value;
-  // 時給は会計ソフトで計算するため雇用形態のみ保存（時給は0で維持）
-  const d = await api({ type: 'save_employee_settings', employeeId: empId, empType: et, wageWeekday: 0, wageSat: 0, wageSunHol: 0 });
+  const d = await api({ type: 'save_employee_settings', employeeId: empId, empType: et });
   const msg = document.getElementById('empSetMsg');
   msg.className = 'msg ' + (d.success ? 'success' : 'error');
-  msg.textContent = d.success ? '✅ ' + (empSetData.find(e=>e.id===empId)||{}).name + ' を保存しました' : 'エラー：' + d.message;
+  msg.textContent = d.success ? '✅ ' + (empSetData.find(e=>e.id===empId)||{}).name + ' の雇用形態を保存しました' : 'エラー：' + d.message;
   msg.style.display = 'block';
+  if (d.success) { const t = empSetData.find(e=>e.id===empId); if (t) t.empType = et; renderEmpSettings(); }
+}
+
+// パートの時給を保存（3区分）。
+async function saveEmpWage(empId) {
+  const et = document.getElementById('et_' + empId).value;
+  const wj = document.getElementById('wj_' + empId).value;
+  const wk = document.getElementById('wk_' + empId).value;
+  const wl = document.getElementById('wl_' + empId).value;
+  const d = await api({ type: 'save_employee_settings', employeeId: empId, empType: et,
+    wageWeekday: Number(wj)||0, wageSat: Number(wk)||0, wageSunHol: Number(wl)||0 });
+  const msg = document.getElementById('empSetMsg');
+  msg.className = 'msg ' + (d.success ? 'success' : 'error');
+  msg.textContent = d.success ? '✅ ' + (empSetData.find(e=>e.id===empId)||{}).name + ' の時給を保存しました' : 'エラー：' + d.message;
+  msg.style.display = 'block';
+  if (d.success) { const t = empSetData.find(e=>e.id===empId);
+    if (t) { t.wageWeekday=Number(wj)||0; t.wageSat=Number(wk)||0; t.wageSunHol=Number(wl)||0; } }
 }
 
 // ============================================================
