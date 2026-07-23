@@ -909,6 +909,13 @@ async function loadPayroll() {
           <div style="font-size:19px;font-weight:bold;color:#1565C0;">${yen(p.projectedPay)}</div>
         </div>
       </div>
+      ${p.deductRate ? `<div style="display:flex;gap:10px;margin-top:8px;">
+        <div style="flex:1;text-align:center;font-size:12px;color:#555;">手取り目安 <b style="color:#2E7D32;">${yen(p.netCurrentPay)}</b></div>
+        <div style="flex:1;text-align:center;font-size:12px;color:#555;">見込 <b style="color:#1565C0;">${yen(p.netProjectedPay)}</b></div>
+      </div>` : ''}
+      ${p.monthlyTarget ? `<div style="margin-top:8px;font-size:12px;color:#5D4037;background:#FFF8E1;border-radius:8px;padding:8px 10px;">
+        🎯 目標¥${p.monthlyTarget.toLocaleString('ja-JP')}（本人設定）：${p.goalAchieved ? '<b style="color:#2E7D32;">達成！</b>' : (p.daysToGoal ? 'あと<b>'+p.daysToGoal+'日</b>で達成予定' : '—')}${(!p.goalAchieved && p.goalWillAchieve) ? '・このままなら達成見込み' : ''}
+      </div>` : ''}
       <div style="font-size:11px;color:#999;margin-top:8px;line-height:1.6;">
         勤務 <b>${p.totalHours}h</b>（平日${p.hoursWeekday}／土${p.hoursSat}／日祝${p.hoursSunHol}h）
         ・出勤${p.workedDays}日／予定${p.plannedWorkDays}日<br>
@@ -940,6 +947,8 @@ function renderEmpSettings() {
                    : '<span style="font-size:11px;color:#ef6c00;">⏳ 未紐付け（本人が打刻を開くと登録）</span>');
     const retireBtn = e.isAdmin ? '' :
       `<button onclick="retireEmployee('${e.id}','${e.name}')" style="background:#fff;border:1px solid #e57373;color:#c62828;border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;">退職</button>`;
+    const targetLine = (e.empType === 'パート' && e.monthlyTarget) ? `
+        <div style="font-size:11px;color:#999;margin-top:8px;">本人設定の月額目標：<b style="color:#1565C0;">¥${(e.monthlyTarget).toLocaleString('ja-JP')}</b></div>` : '';
     const wageBlock = (e.empType === 'パート') ? `
       <div style="margin-top:10px;padding-top:10px;border-top:1px dashed #eee;">
         <div style="font-size:12px;color:#777;margin-bottom:4px;">時給（円）</div>
@@ -951,6 +960,11 @@ function renderEmpSettings() {
           <div style="flex:1;"><label style="font-size:11px;color:#999;">日祝</label>
             <input type="number" id="wl_${e.id}" value="${e.wageSunHol||0}" min="0" step="10" onchange="saveEmpWage('${e.id}')" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:6px;font-size:14px;box-sizing:border-box;"></div>
         </div>
+        <div style="margin-top:8px;display:flex;align-items:flex-end;gap:8px;">
+          <div style="width:120px;"><label style="font-size:11px;color:#999;">控除率（％）</label>
+            <input type="number" id="wr_${e.id}" value="${e.deductRate||0}" min="0" max="100" step="0.5" onchange="saveEmpWage('${e.id}')" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:6px;font-size:14px;box-sizing:border-box;"></div>
+          <div style="font-size:10px;color:#aaa;line-height:1.5;padding-bottom:4px;">手取り目安の計算用<br>額面×(1−率)</div>
+        </div>${targetLine}
       </div>` : '';
     return `
     <div style="border:1px solid #eee;border-radius:10px;padding:14px;margin-bottom:10px;">
@@ -1025,20 +1039,21 @@ async function saveEmpType(empId) {
   if (d.success) { const t = empSetData.find(e=>e.id===empId); if (t) t.empType = et; renderEmpSettings(); }
 }
 
-// パートの時給を保存（3区分）。
+// パートの時給・控除率を保存。
 async function saveEmpWage(empId) {
   const et = document.getElementById('et_' + empId).value;
   const wj = document.getElementById('wj_' + empId).value;
   const wk = document.getElementById('wk_' + empId).value;
   const wl = document.getElementById('wl_' + empId).value;
+  const wr = document.getElementById('wr_' + empId).value;
   const d = await api({ type: 'save_employee_settings', employeeId: empId, empType: et,
-    wageWeekday: Number(wj)||0, wageSat: Number(wk)||0, wageSunHol: Number(wl)||0 });
+    wageWeekday: Number(wj)||0, wageSat: Number(wk)||0, wageSunHol: Number(wl)||0, deductRate: Number(wr)||0 });
   const msg = document.getElementById('empSetMsg');
   msg.className = 'msg ' + (d.success ? 'success' : 'error');
-  msg.textContent = d.success ? '✅ ' + (empSetData.find(e=>e.id===empId)||{}).name + ' の時給を保存しました' : 'エラー：' + d.message;
+  msg.textContent = d.success ? '✅ ' + (empSetData.find(e=>e.id===empId)||{}).name + ' の時給・控除率を保存しました' : 'エラー：' + d.message;
   msg.style.display = 'block';
   if (d.success) { const t = empSetData.find(e=>e.id===empId);
-    if (t) { t.wageWeekday=Number(wj)||0; t.wageSat=Number(wk)||0; t.wageSunHol=Number(wl)||0; } }
+    if (t) { t.wageWeekday=Number(wj)||0; t.wageSat=Number(wk)||0; t.wageSunHol=Number(wl)||0; t.deductRate=Number(wr)||0; } }
 }
 
 // ============================================================

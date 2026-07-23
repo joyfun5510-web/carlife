@@ -415,6 +415,20 @@
   .pc-stat.now .pc-val { color: #2E7D32; }
   .pc-stat.est .pc-val { color: #1565C0; }
   .pc-sub { font-size: 11px; color: #999; margin-top: 8px; line-height: 1.6; }
+  .pc-net { display: flex; gap: 10px; margin-top: 8px; }
+  .pc-net div { flex: 1; text-align: center; font-size: 12px; color: #555; }
+  .pc-goal { margin-top: 10px; background: #FFF8E1; border-radius: 10px; padding: 10px 12px; }
+  .pc-goal-head { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #5D4037; margin-bottom: 6px; }
+  .pc-goal-head .edit { color: #1565C0; font-weight: bold; cursor: pointer; }
+  .pc-bar { height: 8px; background: #eee; border-radius: 5px; overflow: hidden; }
+  .pc-bar-fill { height: 100%; background: #43A047; border-radius: 5px; transition: width .3s; }
+  .pc-goal-status { font-size: 12px; color: #5D4037; margin-top: 6px; }
+  .pc-set-goal { margin-top: 10px; text-align: center; }
+  .pc-target-editor { margin-top: 8px; display: flex; gap: 6px; align-items: center; }
+  .pc-target-editor input { flex: 1; padding: 9px; border: 1px solid #ccc; border-radius: 8px; font-size: 15px; }
+  .pc-btn { padding: 9px 12px; border: none; border-radius: 8px; font-size: 13px; font-weight: bold; cursor: pointer; }
+  .pc-btn.save { background: #1565C0; color: #fff; }
+  .pc-btn.cancel { background: #eee; color: #555; }
 
   .loading { text-align: center; padding: 40px; color: #aaa; }
   .spinner {
@@ -519,6 +533,7 @@ let curYear    = new Date().getFullYear();
 let curMonth   = new Date().getMonth() + 1;
 let calData    = null;
 let selectedDay = null;
+let myPay      = null;   // 直近の自分の給与データ（目標編集で参照）
 
 // ============================================================
 // カレンダー読み込み
@@ -846,10 +861,41 @@ async function loadMyPay() {
     });
     const d = await res.json();
     // パート以外／時給未設定／取得失敗はカード非表示
-    if (!d.success || !d.isPart || !d.payroll) { box.innerHTML = ''; return; }
+    if (!d.success || !d.isPart || !d.payroll) { box.innerHTML = ''; myPay = null; return; }
     const p = d.payroll;
-    if (!(p.wageWeekday || p.wageSat || p.wageSunHol)) { box.innerHTML = ''; return; }
+    if (!(p.wageWeekday || p.wageSat || p.wageSunHol)) { box.innerHTML = ''; myPay = null; return; }
+    myPay = p;
     const yen = n => '¥' + (Number(n) || 0).toLocaleString('ja-JP');
+
+    // 手取り目安（控除率が設定されている場合のみ）
+    const netHtml = p.deductRate ? `
+      <div class="pc-net">
+        <div>手取り目安 <b style="color:#2E7D32;">${yen(p.netCurrentPay)}</b></div>
+        <div>見込 <b style="color:#1565C0;">${yen(p.netProjectedPay)}</b></div>
+      </div>` : '';
+
+    // 月額目標（本人設定）
+    let goalHtml;
+    if (p.monthlyTarget > 0) {
+      const pct = Math.min(100, Math.round(p.currentPay / p.monthlyTarget * 100));
+      let status;
+      if (p.goalAchieved)      status = '🎉 <b>目標達成！</b>';
+      else if (p.daysToGoal)   status = `あと <b>${p.daysToGoal}日</b> 出れば達成予定` + (p.goalWillAchieve ? '（このままなら達成見込み）' : '');
+      else                     status = '—';
+      goalHtml = `
+        <div class="pc-goal">
+          <div class="pc-goal-head">
+            <span>🎯 今月の目標 ¥${p.monthlyTarget.toLocaleString('ja-JP')}（${pct}%）</span>
+            <span class="edit" onclick="pcEditTarget()">変更</span>
+          </div>
+          <div class="pc-bar"><div class="pc-bar-fill" style="width:${pct}%;${p.goalAchieved ? 'background:#2E7D32;' : ''}"></div></div>
+          <div class="pc-goal-status">${status}</div>
+          <div id="pcTargetEditor"></div>
+        </div>`;
+    } else {
+      goalHtml = `<div class="pc-set-goal"><button class="pc-btn save" onclick="pcEditTarget()">🎯 今月の目標を設定する</button><div id="pcTargetEditor"></div></div>`;
+    }
+
     box.innerHTML = `
       <div class="pay-card">
         <div class="pc-title">💰 <b>${nowM}月</b>の給与（目安）</div>
@@ -857,10 +903,45 @@ async function loadMyPay() {
           <div class="pc-stat now"><div class="pc-label">今月ここまで</div><div class="pc-val">${yen(p.currentPay)}</div></div>
           <div class="pc-stat est"><div class="pc-label">月末見込</div><div class="pc-val">${yen(p.projectedPay)}</div></div>
         </div>
-        <div class="pc-sub">勤務 ${p.totalHours}h ・ 出勤${p.workedDays}日<br>※このまま予定通り出た場合の見込みです（税・社会保険の控除前の目安）</div>
+        ${netHtml}
+        ${goalHtml}
+        <div class="pc-sub">勤務 ${p.totalHours}h ・ 出勤${p.workedDays}日<br>※このまま予定通り出た場合の見込みです（額面＝税・社会保険の控除前の目安）</div>
       </div>`;
   } catch (e) {
     box.innerHTML = ''; // 給与カードは失敗しても本体に影響させない
+  }
+}
+
+// 目標の編集フォームを開く
+function pcEditTarget() {
+  const box = document.getElementById('pcTargetEditor');
+  if (!box) return;
+  const cur = (myPay && myPay.monthlyTarget) ? myPay.monthlyTarget : '';
+  box.innerHTML = `
+    <div class="pc-target-editor">
+      <input type="number" id="pcTargetInput" min="0" step="1000" inputmode="numeric" placeholder="例：150000" value="${cur}">
+      <button class="pc-btn save" onclick="pcSaveTarget()">保存</button>
+      <button class="pc-btn cancel" onclick="loadMyPay()">やめる</button>
+    </div>`;
+  const inp = document.getElementById('pcTargetInput');
+  if (inp) inp.focus();
+}
+
+// 目標を保存（本人設定）
+async function pcSaveTarget() {
+  const el = document.getElementById('pcTargetInput');
+  if (!el) return;
+  const v = Math.max(0, Number(el.value) || 0);
+  try {
+    const res = await fetch(GAS_URL, {
+      method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ type: 'set_my_target', userId, amount: v })
+    });
+    const d = await res.json();
+    if (d.success) { loadMyPay(); }
+    else { alert('保存に失敗しました：' + (d.message || '')); }
+  } catch (e) {
+    alert('通信エラーが発生しました');
   }
 }
 
