@@ -398,6 +398,24 @@
   }
   .pin-error { color: #F44336; font-size: 13px; margin-top: 8px; min-height: 20px; }
 
+  /* 給与カード（パート本人のみ） */
+  .pay-card {
+    background: #fff;
+    margin: 12px 12px 0;
+    border-radius: 14px;
+    padding: 14px 16px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+  }
+  .pay-card .pc-title { font-size: 13px; color: #666; font-weight: bold; margin-bottom: 10px; }
+  .pay-card .pc-title b { color: #1565C0; }
+  .pc-stats { display: flex; gap: 10px; }
+  .pc-stat { flex: 1; background: #f5f7fa; border-radius: 10px; padding: 10px; text-align: center; }
+  .pc-stat .pc-label { font-size: 11px; color: #888; }
+  .pc-stat .pc-val { font-size: 20px; font-weight: bold; }
+  .pc-stat.now .pc-val { color: #2E7D32; }
+  .pc-stat.est .pc-val { color: #1565C0; }
+  .pc-sub { font-size: 11px; color: #999; margin-top: 8px; line-height: 1.6; }
+
   .loading { text-align: center; padding: 40px; color: #aaa; }
   .spinner {
     display: inline-block; width: 30px; height: 30px;
@@ -420,6 +438,9 @@
 <div class="header">
   <h1 id="userName">出勤カレンダー</h1>
 </div>
+
+<!-- 給与カード（パート本人のみ・常に今月） -->
+<div id="payCard"></div>
 
 <div class="month-nav">
   <button class="nav-btn" onclick="changeMonth(-1)">‹</button>
@@ -812,6 +833,38 @@ function showModalMsg(type, text) {
 }
 
 // ============================================================
+// 給与カード（パート本人のみ・常に「今月」を表示）
+// ============================================================
+async function loadMyPay() {
+  const nowY = new Date().getFullYear();
+  const nowM = new Date().getMonth() + 1;
+  const box = document.getElementById('payCard');
+  try {
+    const res = await fetch(GAS_URL, {
+      method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ type: 'get_my_payroll', userId, year: nowY, month: nowM })
+    });
+    const d = await res.json();
+    // パート以外／時給未設定／取得失敗はカード非表示
+    if (!d.success || !d.isPart || !d.payroll) { box.innerHTML = ''; return; }
+    const p = d.payroll;
+    if (!(p.wageWeekday || p.wageSat || p.wageSunHol)) { box.innerHTML = ''; return; }
+    const yen = n => '¥' + (Number(n) || 0).toLocaleString('ja-JP');
+    box.innerHTML = `
+      <div class="pay-card">
+        <div class="pc-title">💰 <b>${nowM}月</b>の給与（目安）</div>
+        <div class="pc-stats">
+          <div class="pc-stat now"><div class="pc-label">今月ここまで</div><div class="pc-val">${yen(p.currentPay)}</div></div>
+          <div class="pc-stat est"><div class="pc-label">月末見込</div><div class="pc-val">${yen(p.projectedPay)}</div></div>
+        </div>
+        <div class="pc-sub">勤務 ${p.totalHours}h ・ 出勤${p.workedDays}日<br>※このまま予定通り出た場合の見込みです（税・社会保険の控除前の目安）</div>
+      </div>`;
+  } catch (e) {
+    box.innerHTML = ''; // 給与カードは失敗しても本体に影響させない
+  }
+}
+
+// ============================================================
 // LIFF 初期化
 // ============================================================
 (async () => {
@@ -821,6 +874,7 @@ function showModalMsg(type, text) {
     const profile = await liff.getProfile();
     userId = profile.userId;
     await loadCalendar();
+    loadMyPay();
   } catch (e) {
     console.error('LIFF init error:', e);
     document.getElementById('pinOverlay').style.display = 'flex';
