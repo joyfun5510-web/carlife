@@ -245,6 +245,8 @@
   .k-cell.half { background: #F5F5F5; border-style: dashed; color: #607D8B; }
   .k-cell .khb { font-size: 9px; line-height: 1; margin-top: 1px; padding: 1px 3px; border-radius: 4px; background: #607D8B; color: #fff; font-weight: bold; }
   .k-cell.req-kibou { box-shadow: 0 0 0 2px #7E57C2 inset; }
+  .k-cell.req-cancel { box-shadow: 0 0 0 2px #E65100 inset; }
+  .k-cell .khb.cb { background: #E65100; }
   .k-cell.blank { background: transparent; border: none; cursor: default; }
   .k-cell.today { box-shadow: 0 0 0 2px #FF9800 inset; }
 
@@ -303,7 +305,6 @@
 <div class="tab-bar">
   <div class="tab active" onclick="switchTab('attendance')">📋 出勤</div>
   <div class="tab" onclick="switchTab('overview')">📅 月次</div>
-  <div class="tab" onclick="switchTab('shift')">🔄 シフト<span class="tab-badge" id="shiftBadge" style="display:none"></span></div>
   <div class="tab" onclick="switchTab('koukyuu')">🗓 公休</div>
   <div class="tab" onclick="switchTab('leave')">📝 有給</div>
   <div class="tab" onclick="switchTab('balance')">📅 残日数</div>
@@ -362,14 +363,7 @@
     </div>
   </div>
 
-  <!-- シフト変更タブ -->
-  <div class="tab-panel" id="tab-shift">
-    <div id="pendingShiftList"></div>
-    <div id="recentShiftSection" style="display:none">
-      <div style="font-size:13px;color:#888;font-weight:bold;padding:8px 4px 6px;">最近の処理済み申請</div>
-      <div id="recentShiftList"></div>
-    </div>
-  </div>
+  <!-- シフト変更タブは「休み希望」への一本化に伴い廃止（2026-07-29） -->
 
   <!-- 公休設定タブ -->
   <div class="tab-panel" id="tab-koukyuu">
@@ -392,9 +386,9 @@
       </div>
       <div class="msg" id="kMsg" style="display:none;margin-top:10px;"></div>
       <div style="font-size:11px;color:#999;margin-top:10px;line-height:1.6;">
-        ・日をタップで切替（青＝出勤予定／灰＝公休／点線＝半休／紫枠＝本人の休み希望）<br>
+        ・日をタップで切替（青＝出勤予定／灰＝公休／点線＝半休／紫枠＝本人の休み希望／橙枠「戻」＝本人が出勤に戻したい日）<br>
         ・タップごとに 出勤 → 全休 → 午前半休(前) → 午後半休(後) → 出勤 と循環。半休は0.5日。<br>
-        ・「希望を反映」で本人の希望日を取り込み→修正→「確定保存」<br>
+        ・「希望を反映」で本人の希望（休み追加・出勤に戻す）をまとめて取り込み→修正→「確定保存」<br>
         ・正社員は月6日・パートは最大15日が目安。12月/1月は自由でOK。
       </div>
     </div>
@@ -545,22 +539,13 @@ document.getElementById('headerDate').textContent =
 async function loadDashboard() {
   document.getElementById('loadingWrap').style.display = 'block';
   try {
-    // ダッシュボードとシフト変更を並行取得
-    const [dashRes, shiftRes] = await Promise.all([
-      fetch(GAS_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ type: 'get_dashboard', userId })
-      }),
-      fetch(GAS_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ type: 'get_shift_changes', userId })
-      })
-    ]);
+    const dashRes = await fetch(GAS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ type: 'get_dashboard', userId })
+    });
 
-    const data      = await dashRes.json();
-    const shiftData = await shiftRes.json();
+    const data = await dashRes.json();
 
     if (!data.success) {
       document.getElementById('denyOverlay').style.display = 'flex';
@@ -571,7 +556,7 @@ async function loadDashboard() {
 
     document.getElementById('denyOverlay').style.display = 'none';
     dashData = data;
-    renderDashboard(data, shiftData);
+    renderDashboard(data);
   } catch (e) {
     document.getElementById('denyOverlay').style.display = 'flex';
     document.getElementById('denyMsg').textContent = '通信エラーが発生しました';
@@ -580,11 +565,10 @@ async function loadDashboard() {
   }
 }
 
-function renderDashboard(data, shiftData) {
+function renderDashboard(data) {
   renderAttendance(data);
   renderLeave(data.pendingLeave);
   renderBalance(data.leaveBalance);
-  if (shiftData && shiftData.success) renderShiftChanges(shiftData);
 }
 
 function renderAttendance(data) {
@@ -731,107 +715,6 @@ async function processLeave(appId, type, actionsEl) {
   }
 }
 
-function renderShiftChanges(data) {
-  const pending = data.pending || [];
-  const recent  = data.recent  || [];
-
-  // タブバッジ（未処理件数、緊急は赤く表示）
-  const badge = document.getElementById('shiftBadge');
-  if (pending.length > 0) {
-    badge.textContent = pending.length;
-    badge.style.display = '';
-    badge.style.background = pending.some(r => r.isUrgent) ? '#F44336' : '#FF9800';
-  } else {
-    badge.style.display = 'none';
-  }
-
-  const container = document.getElementById('pendingShiftList');
-  if (pending.length === 0) {
-    container.innerHTML = '<div class="empty">申請中のシフト変更はありません</div>';
-  } else {
-    container.innerHTML = pending.map(r => buildShiftCard(r, true)).join('');
-  }
-
-  // 最近の処理済み申請
-  const recentSection = document.getElementById('recentShiftSection');
-  const recentList    = document.getElementById('recentShiftList');
-  if (recent.length > 0) {
-    recentList.innerHTML = recent.map(r => buildShiftCard(r, false)).join('');
-    recentSection.style.display = 'block';
-  } else {
-    recentSection.style.display = 'none';
-  }
-}
-
-function buildShiftCard(r, isPending) {
-  const urgentBanner = r.isUrgent && isPending
-    ? `<div class="shift-urgent-banner">⚠️ 緊急申請（1週間以内）</div>`
-    : '';
-  const timeChange = r.newStart
-    ? `📌 変更後：${r.newStart} 〜 ${r.newEnd}<br>`
-    : '';
-  const statusBadgeHtml = isPending
-    ? ''
-    : `<span class="badge ${r.status === '承認' ? 'badge-approved' : 'badge-rejected'}">${r.status}</span> `;
-
-  const actions = isPending
-    ? `<div class="leave-actions">
-        <button class="btn-approve" onclick="approveShiftChange('${r.id}', this)">✅ 承認</button>
-        <button class="btn-reject"  onclick="rejectShiftChange('${r.id}', this)">❌ 否認</button>
-      </div>`
-    : '';
-
-  return `<div class="shift-card${r.isUrgent && isPending ? ' urgent' : ''}" id="shift-${r.id}">
-    ${urgentBanner}
-    <div class="shift-name">${statusBadgeHtml}${r.name}</div>
-    <div class="shift-info">
-      📅 対象日：<strong>${r.date}</strong><br>
-      🔄 種別：${r.type}<br>
-      ${timeChange}
-      📝 理由：${r.reason || 'なし'}<br>
-      🕐 申請：${r.appliedAt}
-    </div>
-    ${actions}
-  </div>`;
-}
-
-async function approveShiftChange(reqId, btn) {
-  if (!confirm('このシフト変更を承認しますか？')) return;
-  await processShiftChange(reqId, 'approve_shift_change', btn.closest('.leave-actions'));
-}
-
-async function rejectShiftChange(reqId, btn) {
-  if (!confirm('このシフト変更を否認しますか？')) return;
-  await processShiftChange(reqId, 'reject_shift_change', btn.closest('.leave-actions'));
-}
-
-async function processShiftChange(reqId, type, actionsEl) {
-  actionsEl.querySelectorAll('button').forEach(b => b.disabled = true);
-  try {
-    const res  = await fetch(GAS_URL, {
-      method:  'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body:    JSON.stringify({ type, requestId: reqId, approverId: userId })
-    });
-    const data = await res.json();
-    if (data.success) {
-      const card = document.getElementById('shift-' + reqId);
-      card.style.opacity      = '0.5';
-      card.style.pointerEvents = 'none';
-      actionsEl.innerHTML = `<div style="text-align:center;color:#888;font-size:13px;width:100%;">
-        ${type === 'approve_shift_change' ? '✅ 承認済み' : '❌ 否認済み'}
-      </div>`;
-      await loadDashboard();
-    } else {
-      alert(data.message);
-      actionsEl.querySelectorAll('button').forEach(b => b.disabled = false);
-    }
-  } catch (e) {
-    alert('通信エラーが発生しました');
-    actionsEl.querySelectorAll('button').forEach(b => b.disabled = false);
-  }
-}
-
 // ============================================================
 // 公休への休み希望の依頼・反映
 // ============================================================
@@ -846,11 +729,16 @@ async function requestKibou() {
 function reflectKibou() {
   if (!kData) return;
   const empId = document.getElementById('kEmployee').value;
-  const kibouArr = kData.kibou ? (kData.kibou[empId] || []) : [];
-  if (kibouArr.length === 0) { showKMsg('info', 'この社員の休み希望はまだ届いていません'); return; }
-  kibouArr.forEach(x => kWorking[empId].set(x.d, x.h || '全休'));
+  const kibouArr  = kData.kibou     ? (kData.kibou[empId]     || []) : [];
+  const cancelArr = kData.cancelReq ? (kData.cancelReq[empId] || []) : [];
+  if (kibouArr.length === 0 && cancelArr.length === 0) { showKMsg('info', 'この社員の休み希望はまだ届いていません'); return; }
+  kibouArr.forEach(x => kWorking[empId].set(x.d, x.h || '全休'));   // 休み希望→公休に追加
+  cancelArr.forEach(x => kWorking[empId].delete(x.d));              // 出勤に戻す希望→公休を外す
   renderKoukyuuCalendar();
-  showKMsg('info', '希望 ' + kibouArr.length + '日を取り込みました。確認後「確定保存」してください。');
+  const parts = [];
+  if (kibouArr.length)  parts.push('希望 ' + kibouArr.length + '日');
+  if (cancelArr.length) parts.push('出勤に戻す ' + cancelArr.length + '日');
+  showKMsg('info', parts.join('・') + 'を取り込みました。確認後「確定保存」してください。');
 }
 
 // ============================================================
@@ -1111,6 +999,8 @@ function renderKoukyuuCalendar() {
 
   // 休み希望（未反映分）：ds -> h
   const kibouMap = new Map(((kData.kibou && kData.kibou[empId]) || []).map(x => [x.d, x.h || '全休']));
+  // 出勤に戻す希望（確定公休の取消希望）：ds -> h
+  const cancelMap = new Map(((kData.cancelReq && kData.cancelReq[empId]) || []).map(x => [x.d, x.h || '全休']));
   // 上限
   const limit = (kData.types && kData.types[empId] === 'パート') ? 15 : 6;
 
@@ -1121,19 +1011,24 @@ function renderKoukyuuCalendar() {
     const h = map.get(ds);
     const off = !!h;
     const isKibou = !off && kibouMap.has(ds);
+    const isCancel = off && cancelMap.has(ds);  // 出勤に戻す希望（未反映）
     const today = ds === todayStr;
     const half = off && KHLABEL[h];
-    const bd = half ? `<span class="khb">${KHLABEL[h]}</span>` : '';
-    html += `<div class="k-cell ${off ? 'off' : ''} ${half ? 'half' : ''} ${isKibou ? 'req-kibou' : ''} ${today ? 'today' : ''}" onclick="toggleKoukyuu('${ds}')">${d}${bd}</div>`;
+    const bd = isCancel ? `<span class="khb cb">戻</span>` : (half ? `<span class="khb">${KHLABEL[h]}</span>` : '');
+    html += `<div class="k-cell ${off ? 'off' : ''} ${half ? 'half' : ''} ${isKibou ? 'req-kibou' : ''} ${isCancel ? 'req-cancel' : ''} ${today ? 'today' : ''}" onclick="toggleKoukyuu('${ds}')">${d}${bd}</div>`;
   }
   document.getElementById('kCalendar').innerHTML = html;
   let days = 0; map.forEach(h => days += KHW(h));
   const limit_label = limit === 15 ? '（パート・最大15日）' : days === limit ? '（標準）' : '';
   document.getElementById('kCount').textContent = '公休 ' + days + '日 / 上限' + limit + '日 ' + limit_label;
 
-  // 希望メモ
+  // 希望メモ（休み希望＋出勤に戻す希望）
   const unpicked = Array.from(kibouMap.keys()).filter(d => !map.has(d));
-  document.getElementById('kKibouNote').textContent = unpicked.length > 0 ? '💜 休み希望あり（未反映 ' + unpicked.length + '日）— 「希望を反映」で取り込めます' : '';
+  const cancelsPending = Array.from(cancelMap.keys()).filter(d => map.has(d));
+  const notes = [];
+  if (unpicked.length > 0) notes.push('💜 休み希望あり（未反映 ' + unpicked.length + '日）');
+  if (cancelsPending.length > 0) notes.push('🟠 出勤に戻す希望あり（' + cancelsPending.length + '日）');
+  document.getElementById('kKibouNote').textContent = notes.length > 0 ? notes.join('　') + ' — 「希望を反映」で取り込めます' : '';
 }
 
 // タップで 出勤 → 全休 → 午前 → 午後 → 出勤 を循環

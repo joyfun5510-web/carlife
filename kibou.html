@@ -28,6 +28,9 @@
   .hb { font-size: 9px; line-height: 1; margin-top: 1px; padding: 1px 3px; border-radius: 4px; background: #6A1B9A; color: #fff; font-weight: bold; }
   .cell.fixed { background: #ECEFF1; color: #90A4AE; border-color: #cfd8dc; cursor: not-allowed; }
   .cell.fixed .hb { background: #90A4AE; }
+  .cell.fixed.tappable { cursor: pointer; }
+  .cell.fixed.cancel { background: #FFF3E0; color: #E65100; border-color: #FFB74D; font-weight: bold; }
+  .cell.fixed.cancel .hb { background: #E65100; }
   .cell.past { background: #fafafa; color: #ccc; border-color: #eee; cursor: not-allowed; }
   .cell.blank { background: transparent; border: none; cursor: default; }
   .cell.sun { color: #E53935; } .cell.sat { color: #1E88E5; }
@@ -63,14 +66,17 @@
         <span><span class="legdot" style="background:#EDE7F6;border:1px solid #B39DDB;"></span>希望(全休)</span>
         <span><span class="legdot" style="background:#F3E5F5;border:1px dashed #B39DDB;"></span>半休</span>
         <span><span class="legdot" style="background:#ECEFF1;"></span>確定済</span>
+        <span><span class="legdot" style="background:#FFF3E0;border:1px solid #FFB74D;"></span>出勤に戻す</span>
       </div>
       <button class="btn" id="submitBtn" onclick="submit()">この内容で休み希望を送信</button>
       <div class="msg" id="msg"></div>
       <div style="font-size:11px;color:#999;margin-top:10px;line-height:1.6;">
         ・休みたい日をタップで選びます。タップするたびに <b>全休 → 午前半休(前) → 午後半休(後) → 解除</b> と切り替わります。<br>
         ・半休は0.5日として数えます（例：全休4日＋半休4回＝6日分）。<br>
-        ・過去の日と確定済みの日は選べません。<br>
-        ・送信後、管理者が確認して確定します。確定で公休になります。
+        ・<b>確定済み（灰色）の日をタップすると「出勤に戻す」申請</b>になります（もう一度タップで取消）。管理者が確定すると出勤予定に戻ります。<br>
+        ・今日と過去の日はここでは選べません。<b>今日の休みは打刻画面の「今日は急に休みます」</b>から送ってください。<br>
+        ・有給（給与あり）で休みたい場合は <a href="https://liff.line.me/2010271028-0icXsJRZ" style="color:#2196F3;font-weight:bold;">有給申請</a> から。<br>
+        ・送信後、管理者が確認して確定します。確定で公休（または出勤）になります。
       </div>
     </div>
   </div>
@@ -81,9 +87,11 @@ const GAS_URL = 'https://script.google.com/macros/s/AKfycbxNeh517FPMHlPy8b6w3kDV
 const LIFF_ID = '2010271028-O7CB5K21';
 const DOW = ['日','月','火','水','木','金','土'];
 let userId = null, year, month, data = null, sel = new Map(); // ds -> '全休'|'午前'|'午後'
+let cancelSel = new Set(); // 確定公休を「出勤に戻す」希望の日付(ds)
 let MIN_Y, MIN_M; // 当月（これより前の月には戻れない）
 const HW = h => (h === '午前' || h === '午後') ? 0.5 : 1; // 消費日数
 const HLABEL = { '午前':'前', '午後':'後' };
+const todayDs = () => { const n = new Date(); return n.getFullYear()+'/'+String(n.getMonth()+1).padStart(2,'0')+'/'+String(n.getDate()).padStart(2,'0'); };
 
 async function api(p) {
   const res = await fetch(GAS_URL, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify(Object.assign({userId}, p)) });
@@ -94,7 +102,10 @@ async function load() {
   const d = await api({ type:'get_my_kibou', year, month });
   if (!d.success) { showMsg('error', d.message); return; }
   data = d;
-  sel = new Map((d.kibou || []).map(x => [x.d, x.h || '全休']));
+  const t = todayDs();
+  // 明日以降のみ編集対象（当日以前の希望行＝急な休みの自動起票分は触らない）
+  sel = new Map((d.kibou || []).filter(x => x.d > t).map(x => [x.d, x.h || '全休']));
+  cancelSel = new Set((d.cancelReq || []).filter(x => x.d > t).map(x => x.d));  // 申請済みの「出勤に戻す」をプリロード
   document.getElementById('empName').textContent = d.name + ' さん';
   document.getElementById('empSub').textContent = d.empType + '（休み希望は最大' + d.limit + '日/月）';
   document.getElementById('monthLabel').textContent = year + '年 ' + month + '月';
@@ -131,9 +142,15 @@ function render() {
     if (confMap.has(ds)) {
       const h = confMap.get(ds);
       const bd = HLABEL[h] ? `<span class="hb">${HLABEL[h]}</span>` : '';
-      html += `<div class="cell fixed ${HLABEL[h]?'half':''}">${d}${bd}</div>`; continue;
+      if (ds <= todayStr) {  // 今日・過去の確定公休はタップ不可
+        html += `<div class="cell fixed ${HLABEL[h]?'half':''}">${d}${bd}</div>`; continue;
+      }
+      // 未来の確定公休はタップで「出勤に戻す」希望に切替
+      const cancel = cancelSel.has(ds);
+      const cbd = cancel ? `<span class="hb">戻</span>` : bd;
+      html += `<div class="cell fixed tappable ${HLABEL[h]?'half':''} ${cancel?'cancel':''}" onclick="toggleCancel('${ds}')">${d}${cbd}</div>`; continue;
     }
-    if (ds < todayStr) { html += `<div class="cell past ${dowcls}">${d}</div>`; continue; } // 過去日は選択不可
+    if (ds <= todayStr) { html += `<div class="cell past ${dowcls}">${d}</div>`; continue; } // 今日・過去日は選択不可（当日は急な休みへ）
     const h = sel.get(ds);
     const cls = h ? ('req ' + (HLABEL[h] ? 'half' : '')) : '';
     const bd = (h && HLABEL[h]) ? `<span class="hb">${HLABEL[h]}</span>` : '';
@@ -142,9 +159,10 @@ function render() {
   document.getElementById('grid').innerHTML = html;
   const c = document.getElementById('count');
   let selDays = 0; sel.forEach(h => selDays += HW(h));
-  const total = confDays + selDays;       // 確定＋希望 の消費日数で上限判定
+  let cancelDays = 0; cancelSel.forEach(ds2 => cancelDays += HW(confMap.get(ds2)));
+  const total = confDays - cancelDays + selDays;  // 確定−出勤に戻す＋希望 の消費日数で上限判定
   const over = total > data.limit;
-  c.textContent = '公休 確定' + confDays + '＋希望' + selDays + ' ／ 上限' + data.limit + '日';
+  c.textContent = '公休 確定' + confDays + (cancelDays ? '−戻す' + cancelDays : '') + '＋希望' + selDays + ' ／ 上限' + data.limit + '日';
   c.className = 'count' + (over ? ' over' : '');
   document.getElementById('submitBtn').disabled = over;
 }
@@ -159,12 +177,21 @@ function toggle(ds) {
   render();
 }
 
+// 確定公休をタップで「出勤に戻す」希望のON/OFF
+function toggleCancel(ds) {
+  if (cancelSel.has(ds)) cancelSel.delete(ds);
+  else cancelSel.add(ds);
+  render();
+}
+
 async function submit() {
   showMsg('info', '送信中...');
   const dates = Array.from(sel.entries()).map(([d,h]) => ({ d, h })).sort((a,b) => a.d < b.d ? -1 : 1);
-  const d = await api({ type:'submit_kibou', dates, year, month });
+  const cancels = Array.from(cancelSel).sort();
+  const d = await api({ type:'submit_kibou', dates, year, month, cancels });
   if (d.success) {
-    showMsg('success', '休み希望を送信しました（' + (d.days != null ? d.days : d.count) + '日分）。管理者の確認をお待ちください。');
+    const cnote = cancels.length ? '、出勤に戻す希望 ' + cancels.length + '日' : '';
+    showMsg('success', '休み希望を送信しました（' + (d.days != null ? d.days : d.count) + '日分' + cnote + '）。管理者の確認をお待ちください。');
     setTimeout(() => { try { liff.closeWindow(); } catch(e){} }, 1800);
   } else showMsg('error', d.message);
 }

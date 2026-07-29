@@ -196,6 +196,9 @@
     <textarea id="reason" placeholder="例：私用のため"></textarea>
     <div class="msg" id="formMsg"></div>
     <button class="btn-submit" id="btnSubmit" onclick="submitForm()" disabled>申請する</button>
+    <div style="font-size:12px;color:#888;margin-top:12px;text-align:center;">
+      無給のお休み（公休）は <a href="https://liff.line.me/2010271028-O7CB5K21" style="color:#6A1B9A;font-weight:bold;">休み希望</a> から
+    </div>
   </div>
 
 </div>
@@ -230,6 +233,17 @@ async function loadBalance() {
 
     document.getElementById('bootSection').style.display = 'none';
     show('balanceSection');
+
+    // 有給の付与が無い人（有給非対象）は申請フォームの代わりに休み希望へ誘導
+    if ((Number(data.total) || 0) === 0 && (Number(data.remaining) || 0) === 0) {
+      const fm = document.getElementById('formSection');
+      fm.classList.remove('section-hidden');
+      fm.innerHTML = '<h2>申請内容</h2>' +
+        '<div class="msg info" style="display:block;">有給の付与がないため、こちらからは申請できません。<br>お休みは「休み希望」から申請してください。</div>' +
+        '<button class="btn-submit" style="background:#6A1B9A;" onclick="location.href=\'https://liff.line.me/2010271028-O7CB5K21\'">🗓 休み希望をひらく</button>';
+      return;
+    }
+
     show('formSection');
 
     // 今日以降の日付をデフォルト
