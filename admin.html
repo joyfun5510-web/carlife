@@ -664,8 +664,8 @@ function renderBalance(balance) {
     const pct   = b.total > 0 ? Math.round(b.remaining / b.total * 100) : 0;
     const cls   = pct >= 50 ? 'high' : pct >= 25 ? 'mid' : 'low';
     return `
-      <tr>
-        <td><strong>${b.name}</strong></td>
+      <tr onclick="toggleLeaveDetail('${b.employeeId}', '${b.name}')" style="cursor:pointer;">
+        <td><strong>${b.name}</strong> <span style="font-size:10px;color:#bbb;">▼</span></td>
         <td>${b.total}日</td>
         <td>${b.used}日</td>
         <td><strong>${b.remaining}日</strong>
@@ -675,8 +675,46 @@ function renderBalance(balance) {
         </td>
         <td style="font-size:11px;color:#aaa;">${pct}%</td>
       </tr>
+      <tr id="lvd-${b.employeeId}" style="display:none;">
+        <td colspan="5" style="background:#F7F9FA;padding:8px 12px;" id="lvd-body-${b.employeeId}"></td>
+      </tr>
     `;
   }).join('');
+}
+
+// 名前タップ→その社員の今年度の有給消化日を展開表示
+const lvCache = {};
+async function toggleLeaveDetail(empId, name) {
+  const row = document.getElementById('lvd-' + empId);
+  if (!row) return;
+  if (row.style.display !== 'none') { row.style.display = 'none'; return; }
+  row.style.display = '';
+  const body = document.getElementById('lvd-body-' + empId);
+  if (!lvCache[empId]) {
+    body.innerHTML = '<span style="color:#999;font-size:12px;">読み込み中...</span>';
+    lvCache[empId] = await api({ type: 'get_employee_leave', employeeId: empId });
+  }
+  const d = lvCache[empId];
+  if (!d || !d.success) {
+    body.innerHTML = '<span style="color:#C62828;font-size:12px;">' + ((d && d.message) || '取得エラー') + '</span>';
+    delete lvCache[empId];
+    return;
+  }
+  const md = ds => { const p = ds.split('/'); return Number(p[1]) + '/' + Number(p[2]); };
+  const note = (d.used != null && Math.round((d.used - d.listDays) * 10) / 10 > 0)
+    ? '<div style="font-size:11px;color:#999;margin-top:4px;">※ほかにシステム導入前の使用 ' + (Math.round((d.used - d.listDays) * 10) / 10) + '日を含みます</div>'
+    : '';
+  if (d.items.length === 0) {
+    body.innerHTML = '<span style="font-size:12px;color:#888;">今年度、アプリで申請された有給はありません</span>' + note;
+    return;
+  }
+  const list = d.items.map(x => {
+    const period = x.start === x.end ? md(x.start) : md(x.start) + ' 〜 ' + md(x.end);
+    const halfBadge = (x.half === '午前' || x.half === '午後')
+      ? ' <span style="background:#26A69A;color:#fff;border-radius:4px;padding:0 4px;font-size:10px;">' + x.half + '半休</span>' : '';
+    return '<div style="padding:2px 0;font-size:12.5px;">📅 ' + period + halfBadge + '（' + x.days + '日）</div>';
+  }).join('');
+  body.innerHTML = '<div style="font-size:11px;color:#888;margin-bottom:3px;">' + name + ' さんの有給消化日（' + d.fiscalYear + '年度・承認済み ' + d.listDays + '日）</div>' + list + note;
 }
 
 async function approveLeave(appId, btn) {
