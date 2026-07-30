@@ -247,6 +247,8 @@
   .k-cell.req-kibou { box-shadow: 0 0 0 2px #7E57C2 inset; }
   .k-cell.req-cancel { box-shadow: 0 0 0 2px #E65100 inset; }
   .k-cell .khb.cb { background: #E65100; }
+  .k-cell.leave { background: #E0F2F1; color: #00695C; border-color: #80CBC4; font-weight: bold; cursor: default; }
+  .k-cell .khb.lv { background: #26A69A; }
   .k-cell.blank { background: transparent; border: none; cursor: default; }
   .k-cell.today { box-shadow: 0 0 0 2px #FF9800 inset; }
 
@@ -386,7 +388,7 @@
       </div>
       <div class="msg" id="kMsg" style="display:none;margin-top:10px;"></div>
       <div style="font-size:11px;color:#999;margin-top:10px;line-height:1.6;">
-        ・日をタップで切替（青＝出勤予定／灰＝公休／点線＝半休／紫枠＝本人の休み希望／橙枠「戻」＝本人が出勤に戻したい日）<br>
+        ・日をタップで切替（青＝出勤予定／灰＝公休／点線＝半休／紫枠＝本人の休み希望／橙枠「戻」＝本人が出勤に戻したい日／<b>緑「有」＝承認済み有給（タップ不可・公休とは別枠）</b>）<br>
         ・タップごとに 出勤 → 全休 → 午前半休(前) → 午後半休(後) → 出勤 と循環。半休は0.5日。<br>
         ・「希望を反映」で本人の希望（休み追加・出勤に戻す）をまとめて取り込み→修正→「確定保存」<br>
         ・正社員は月6日・パートは最大15日が目安。12月/1月は自由でOK。
@@ -1001,6 +1003,8 @@ function renderKoukyuuCalendar() {
   const kibouMap = new Map(((kData.kibou && kData.kibou[empId]) || []).map(x => [x.d, x.h || '全休']));
   // 出勤に戻す希望（確定公休の取消希望）：ds -> h
   const cancelMap = new Map(((kData.cancelReq && kData.cancelReq[empId]) || []).map(x => [x.d, x.h || '全休']));
+  // 承認済み有給：ds -> h（表示のみ・タップ不可）
+  const leaveMap = new Map(((kData.leave && kData.leave[empId]) || []).map(x => [x.d, x.h || '全休']));
   // 上限
   const limit = (kData.types && kData.types[empId] === 'パート') ? 15 : 6;
 
@@ -1010,25 +1014,39 @@ function renderKoukyuuCalendar() {
     const ds = kYear + '/' + String(kMonth).padStart(2, '0') + '/' + String(d).padStart(2, '0');
     const h = map.get(ds);
     const off = !!h;
+    const today = ds === todayStr;
+
+    // 承認済み有給の日（公休が重なっていない場合）＝緑表示・タップ不可（公休を設定する必要がない）
+    const lv = leaveMap.get(ds);
+    if (lv && !off) {
+      const lb = lv === '全休' ? '有' : (lv === '午前' ? '有前' : '有後');
+      html += `<div class="k-cell leave ${today ? 'today' : ''}">${d}<span class="khb lv">${lb}</span></div>`;
+      continue;
+    }
+
     const isKibou = !off && kibouMap.has(ds);
     const isCancel = off && cancelMap.has(ds);  // 出勤に戻す希望（未反映）
-    const today = ds === todayStr;
     const half = off && KHLABEL[h];
+    // 公休と有給が重なっている日はタップ可のまま「有」バッジも重ねて警告（公休を外す操作ができるように）
+    const lvOverlap = lv && off ? `<span class="khb lv">有</span>` : '';
     const bd = isCancel ? `<span class="khb cb">戻</span>` : (half ? `<span class="khb">${KHLABEL[h]}</span>` : '');
-    html += `<div class="k-cell ${off ? 'off' : ''} ${half ? 'half' : ''} ${isKibou ? 'req-kibou' : ''} ${isCancel ? 'req-cancel' : ''} ${today ? 'today' : ''}" onclick="toggleKoukyuu('${ds}')">${d}${bd}</div>`;
+    html += `<div class="k-cell ${off ? 'off' : ''} ${half ? 'half' : ''} ${isKibou ? 'req-kibou' : ''} ${isCancel ? 'req-cancel' : ''} ${today ? 'today' : ''}" onclick="toggleKoukyuu('${ds}')">${d}${bd}${lvOverlap}</div>`;
   }
   document.getElementById('kCalendar').innerHTML = html;
   let days = 0; map.forEach(h => days += KHW(h));
   const limit_label = limit === 15 ? '（パート・最大15日）' : days === limit ? '（標準）' : '';
   document.getElementById('kCount').textContent = '公休 ' + days + '日 / 上限' + limit + '日 ' + limit_label;
 
-  // 希望メモ（休み希望＋出勤に戻す希望）
+  // 希望メモ（休み希望＋出勤に戻す希望＋有給）
   const unpicked = Array.from(kibouMap.keys()).filter(d => !map.has(d));
   const cancelsPending = Array.from(cancelMap.keys()).filter(d => map.has(d));
   const notes = [];
   if (unpicked.length > 0) notes.push('💜 休み希望あり（未反映 ' + unpicked.length + '日）');
   if (cancelsPending.length > 0) notes.push('🟠 出勤に戻す希望あり（' + cancelsPending.length + '日）');
-  document.getElementById('kKibouNote').textContent = notes.length > 0 ? notes.join('　') + ' — 「希望を反映」で取り込めます' : '';
+  let noteText = notes.length > 0 ? notes.join('　') + ' — 「希望を反映」で取り込めます' : '';
+  let lvDays = 0; leaveMap.forEach(h2 => lvDays += KHW(h2));
+  if (lvDays > 0) noteText += (noteText ? '　' : '') + '🟢 承認済み有給 ' + lvDays + '日（公休とは別枠）';
+  document.getElementById('kKibouNote').textContent = noteText;
 }
 
 // タップで 出勤 → 全休 → 午前 → 午後 → 出勤 を循環
