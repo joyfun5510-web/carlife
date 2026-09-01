@@ -423,6 +423,10 @@
         <button class="btn-login" style="background:#7E57C2;flex:1;font-size:14px;" onclick="reflectKibou()">希望を反映</button>
         <button class="btn-login" style="background:#2E7D32;flex:1;font-size:14px;" onclick="saveKoukyuuChanges()">💾 公休を確定保存</button>
       </div>
+      <button class="btn-login" style="background:#EF6C00;width:100%;margin-top:8px;font-size:14px;" onclick="applyAllKibouFlow()">⚡ 届いている希望を全員まとめて反映</button>
+      <div style="font-size:11px;color:#999;margin-top:4px;line-height:1.5;">
+        ※押すと、まず「誰の何日が確定されるか」の確認が出ます。そこでOKを押すまで保存されません。
+      </div>
       <div class="msg" id="kMsg" style="display:none;margin-top:10px;"></div>
       <div style="font-size:11px;color:#999;margin-top:10px;line-height:1.6;">
         ・日をタップで切替（青＝出勤予定／灰＝公休／点線＝半休／紫枠＝本人の休み希望／橙枠「戻」＝本人が出勤に戻したい日／<b>緑「有」＝承認済み有給（タップ不可・公休とは別枠）</b>）<br>
@@ -898,6 +902,63 @@ function reflectKibou() {
   if (kibouArr.length)  parts.push('希望 ' + kibouArr.length + '日');
   if (cancelArr.length) parts.push('出勤に戻す ' + cancelArr.length + '日');
   showKMsg('info', parts.join('・') + 'を取り込みました。確認後「確定保存」してください。');
+}
+
+// ============================================================
+// ワンボタン一括反映（フェーズ3・2026-09-02）
+// 必ず2段階：①下見して確認画面 → ②OKなら、その下見と同じ状態のときだけ実行。
+// 確認画面を出したあとに新しい希望が届いていたら、サーバー側が中断する。
+// ============================================================
+const kDayNum = ds => Number(ds.slice(8, 10)) + '日';
+
+async function applyAllKibouFlow() {
+  showKMsg('info', '確認中...');
+  const dry = await api({ type: 'apply_all_kibou', year: kYear, month: kMonth, dryRun: true });
+  if (!dry.success) { showKMsg('error', dry.message); return; }
+
+  const plan = dry.plan || [], skipped = dry.skipped || [];
+  if (!plan.length && !skipped.length) {
+    showKMsg('info', kYear + '年' + kMonth + '月に未反映の休み希望はありません');
+    return;
+  }
+
+  let msg = kYear + '年' + kMonth + '月の休み希望をまとめて反映します。\n\n';
+  if (plan.length) {
+    msg += '【反映する ' + plan.length + '名】\n';
+    plan.forEach(p => {
+      const bits = [];
+      if (p.added.length)   bits.push('休み追加 ' + p.added.map(kDayNum).join('・'));
+      if (p.removed.length) bits.push('出勤に戻す ' + p.removed.map(kDayNum).join('・'));
+      msg += '・' + p.name + '（公休 ' + p.before + '日→' + p.after + '日）\n　' + bits.join(' / ') + '\n';
+    });
+  } else {
+    msg += '【反映する】なし\n';
+  }
+  if (skipped.length) {
+    msg += '\n【反映しない ' + skipped.length + '名】\n';
+    skipped.forEach(s => { msg += '・' + s.name + '：' + s.reason + '\n'; });
+  }
+  msg += '\nこの内容で実行しますか？';
+
+  if (!confirm(msg)) { showKMsg('info', '中止しました（何も保存していません）'); return; }
+
+  showKMsg('info', '反映中...しばらくお待ちください');
+  const res = await api({ type: 'apply_all_kibou', year: kYear, month: kMonth,
+                          expect: dry.fingerprint, dryRun: false });
+
+  if (!res.success) {
+    showKMsg('error', res.message);
+    if (res.stale) { await loadKoukyuu(); await loadPendingKibou(); }
+    return;
+  }
+
+  await loadKoukyuu();
+  await loadPendingKibou();
+  let done = '✅ ' + res.applied + '名 / ' + res.days + '日を確定しました';
+  if (res.skipped && res.skipped.length) {
+    done += '　※' + res.skipped.length + '名は未反映のまま（上限超えなど）。個別に調整してください';
+  }
+  showKMsg('success', done);
 }
 
 // ============================================================
