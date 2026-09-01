@@ -44,6 +44,38 @@
     transition: all 0.2s;
   }
   .tab.active { color: #37474F; border-bottom-color: #37474F; font-weight: bold; }
+  /* 未反映の休み希望：公休タブの赤バッジ（既存 .tab-badge とは別クラス） */
+  .kk-badge {
+    display: none;
+    background: #D32F2F; color: #fff;
+    font-size: 10px; font-weight: bold; line-height: 1;
+    padding: 2px 5px; border-radius: 9px;
+    margin-left: 3px; vertical-align: top;
+  }
+  .kk-badge.on { display: inline-block; }
+  /* 未反映の休み希望：警告カード */
+  .pk-alert {
+    display: none;
+    background: #FFF3E0; border: 2px solid #EF6C00;
+    border-radius: 12px; padding: 14px; margin-bottom: 12px;
+  }
+  .pk-alert.on { display: block; }
+  .pk-alert.urgent { background: #FFEBEE; border-color: #C62828; }
+  .pk-head { font-size: 14px; font-weight: bold; color: #E65100; margin-bottom: 4px; }
+  .pk-alert.urgent .pk-head { color: #B71C1C; }
+  .pk-sub { font-size: 11px; color: #777; margin-bottom: 10px; line-height: 1.5; }
+  .pk-row {
+    display: flex; align-items: center; gap: 8px;
+    background: #fff; border-radius: 8px;
+    padding: 9px 10px; margin-bottom: 6px;
+    cursor: pointer; border: 1px solid #eee;
+  }
+  .pk-row:active { background: #F5F5F5; }
+  .pk-name { font-weight: bold; font-size: 13px; color: #333; flex: 0 0 auto; }
+  .pk-detail { font-size: 11px; color: #666; flex: 1; line-height: 1.4; }
+  .pk-age { font-size: 10px; font-weight: bold; color: #fff; background: #EF6C00; border-radius: 8px; padding: 2px 7px; white-space: nowrap; }
+  .pk-age.warn { background: #C62828; }
+  .pk-age.new  { background: #7E57C2; }
   .content { padding: 16px; max-width: 600px; margin: 0 auto; }
   .tab-panel { display: none; }
   .tab-panel.active { display: block; }
@@ -307,7 +339,7 @@
 <div class="tab-bar">
   <div class="tab active" onclick="switchTab('attendance')">📋 出勤</div>
   <div class="tab" onclick="switchTab('overview')">📅 月次</div>
-  <div class="tab" onclick="switchTab('koukyuu')">🗓 公休</div>
+  <div class="tab" onclick="switchTab('koukyuu')">🗓 公休<span class="kk-badge" id="kkBadge"></span></div>
   <div class="tab" onclick="switchTab('leave')">📝 有給</div>
   <div class="tab" onclick="switchTab('balance')">📅 残日数</div>
   <div class="tab" onclick="switchTab('payroll')">💴 給与</div>
@@ -323,8 +355,13 @@
     <div style="margin-top:10px;font-size:13px;">読み込み中...</div>
   </div>
 
+  <!-- 未反映の休み希望（反映忘れ防止）。タブの外に置くので、どのタブを見ていても必ず目に入る -->
+  <div class="pk-alert" id="pkAlert"></div>
+
   <!-- 出勤状況タブ -->
-  <div class="tab-panel" id="tab-attendance">
+  <!-- タブバーの「📋出勤」がactive表示なので、パネル側も最初からactiveにする
+       （これが無いと開いた直後は本文が空白のままだった。2026-09-02修正） -->
+  <div class="tab-panel active" id="tab-attendance">
     <div class="summary-grid" id="summaryGrid"></div>
     <div class="card">
       <div class="card-title">📋 本日の出勤状況</div>
@@ -559,6 +596,7 @@ async function loadDashboard() {
     document.getElementById('denyOverlay').style.display = 'none';
     dashData = data;
     renderDashboard(data);
+    loadPendingKibou();   // 未反映の休み希望（失敗しても本体に影響しないので待たない）
   } catch (e) {
     document.getElementById('denyOverlay').style.display = 'flex';
     document.getElementById('denyMsg').textContent = '通信エラーが発生しました';
@@ -571,6 +609,87 @@ function renderDashboard(data) {
   renderAttendance(data);
   renderLeave(data.pendingLeave);
   renderBalance(data.leaveBalance);
+}
+
+// ============================================================
+// 未反映の休み希望（管理者の反映忘れ防止）2026-09-02
+// 「公休設定」に希望のまま残っている＝カレンダー・給与・欠勤判定に入っていない。
+// 確定保存すると自動で消える。
+// ============================================================
+let pkData = null;
+
+async function loadPendingKibou() {
+  try {
+    const d = await api({ type: 'get_pending_kibou' });
+    if (!d || !d.success) return;      // 失敗しても他の表示は壊さない
+    pkData = d;
+    renderPendingKibou();
+  } catch (e) { console.error('pending kibou:', e); }
+}
+
+// 'yyyy/MM/dd' / 'yyyy/MM/dd(午前)' の配列 → '3日・10日(前)・17日' の短縮表記
+function pkDays(list) {
+  return (list || []).map(s => {
+    const day = Number(s.slice(8, 10));
+    const half = s.indexOf('午前') >= 0 ? '(前)' : (s.indexOf('午後') >= 0 ? '(後)' : '');
+    return day + '日' + half;
+  }).join('・');
+}
+
+function renderPendingKibou() {
+  const d = pkData;
+  const badge = document.getElementById('kkBadge');
+  const box = document.getElementById('pkAlert');
+
+  if (!d || !d.items || d.items.length === 0) {
+    if (badge) { badge.className = 'kk-badge'; badge.textContent = ''; }
+    if (box) { box.className = 'pk-alert'; box.innerHTML = ''; }
+    return;
+  }
+
+  if (badge) { badge.className = 'kk-badge on'; badge.textContent = d.totalEmployees; }
+
+  const urgent = d.oldestAgeDays >= 2;
+  const rows = d.items.map(g => {
+    const parts = [];
+    if (g.kibouDays)  parts.push('休み希望 ' + g.kibouDays + '日（' + pkDays(g.kibouDates) + '）');
+    if (g.cancelDays) parts.push('出勤に戻す ' + g.cancelDays + '日（' + pkDays(g.cancelDates) + '）');
+    const ageCls = g.ageDays >= 2 ? 'warn' : (g.ageDays >= 1 ? '' : 'new');
+    const ageTxt = g.ageDays >= 1 ? g.ageDays + '日経過' : '今日';
+    const retired = g.active ? '' : '<br><span style="color:#C62828;">※退職者の残骸（画面で選べません）</span>';
+    return '<div class="pk-row" onclick="pkJump(\'' + g.empId + '\',' + g.year + ',' + g.month + ')">'
+      + '<div class="pk-name">' + g.name + '</div>'
+      + '<div class="pk-detail">' + g.year + '年' + g.month + '月<br>' + parts.join('<br>')
+      + (g.firstSubmitted ? '<br><span style="color:#999;">提出 ' + g.firstSubmitted + '</span>' : '')
+      + retired + '</div>'
+      + '<div class="pk-age ' + ageCls + '">' + ageTxt + '</div>'
+      + '</div>';
+  }).join('');
+
+  const head = '⚠️ 未反映の休み希望　' + d.totalEmployees + '名 / ' + d.totalDays + '日'
+    + (d.overdueCount ? '（うち翌日超過 ' + d.overdueCount + '件）' : '');
+  const sub = '反映していない希望はカレンダー・給与集計・欠勤判定に入りません。'
+    + '名前をタップ →「希望を反映」→「💾公休を確定保存」で消えます。';
+
+  if (box) {
+    box.className = 'pk-alert on' + (urgent ? ' urgent' : '');
+    box.innerHTML = '<div class="pk-head">' + head + '</div><div class="pk-sub">' + sub + '</div>' + rows;
+  }
+}
+
+// 未反映の行タップ → 公休タブのその社員・その月へ移動
+async function pkJump(empId, y, m) {
+  kYear = y; kMonth = m;
+  activateTab('koukyuu');
+  await loadKoukyuu();
+  const sel = document.getElementById('kEmployee');
+  if (sel && Array.from(sel.options).some(o => o.value === empId)) {
+    sel.value = empId;
+    renderKoukyuuCalendar();
+  } else {
+    showKMsg('error', 'この社員は公休画面の対象外です（退職者など）。スプレッドシートの「公休設定」で直接ご確認ください。');
+  }
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function renderAttendance(data) {
@@ -1106,7 +1225,14 @@ async function saveKoukyuuChanges() {
   const dates = Array.from(kWorking[empId] || new Map()).map(([d, h]) => ({ d, h })).sort((a, b) => a.d < b.d ? -1 : 1);
   showKMsg('info', '保存中...');
   const data = await api({ type: 'save_koukyuu', employeeId: empId, dates, year: kYear, month: kMonth });
-  if (data.success) showKMsg('success', '保存しました（公休 ' + data.count + '件）');
+  if (data.success) {
+    showKMsg('success', '保存しました（公休 ' + data.count + '件）');
+    // 保存でこの社員・この月の希望行は消える → 未反映一覧と画面の紫枠を最新化
+    await loadKoukyuu();
+    const sel2 = document.getElementById('kEmployee');
+    if (sel2 && Array.from(sel2.options).some(o => o.value === empId)) { sel2.value = empId; renderKoukyuuCalendar(); }
+    await loadPendingKibou();
+  }
   else showKMsg('error', data.message);
 }
 
